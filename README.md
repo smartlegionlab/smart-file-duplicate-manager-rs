@@ -38,6 +38,7 @@ that avoids reading entire files unless necessary.
 - JSON output for scripting and integration
 - Reusable JSON reports: apply actions later without rescanning
 - Size and mtime validation when applying actions from a saved report
+- Optional sampling mode for large files (opt-in, off by default)
 - Filters: extension, path exclusion, size range, hidden files
 - Colored output (ANSI, no external color crates)
 - Progress bars for long operations
@@ -83,26 +84,28 @@ smart_file_duplicate_manager -p ~/Pictures
 
 ### Options
 
-| Option                 | Description                                                       | Default  |
-|------------------------|-------------------------------------------------------------------|----------|
-| `-p, --path <PATH>`    | Directory to scan (required unless `--from-report` is used)       | —        |
-| `--from-report <FILE>` | Load duplicate groups from a JSON report instead of scanning      | —        |
-| `--min-size <BYTES>`   | Minimum file size                                                 | `1`      |
-| `--max-size <BYTES>`   | Maximum file size                                                 | —        |
-| `--ext <LIST>`         | Only these extensions (comma-separated)                           | —        |
-| `--exclude <LIST>`     | Skip paths containing these substrings                            | —        |
-| `--hidden`             | Include hidden files                                              | `false`  |
-| `--follow-links`       | Follow symbolic links                                             | `false`  |
-| `--keep <STRATEGY>`    | Which file to keep: `first`, `newest`, `oldest`, `shortest`       | `first`  |
-| `--action <ACTION>`    | `report`, `trash`, `move`, `delete`, `hardlink`                   | `report` |
-| `--action-dir <DIR>`   | Destination for `move` action                                     | —        |
-| `--yes`                | Execute destructive actions (without it: dry-run)                 | `false`  |
-| `--dry-run`            | Force dry-run even with `--yes`                                   | `false`  |
-| `--limit <N>`          | Show only top N groups in report                                  | —        |
-| `--group-by-dir`       | Show directories with most duplicates                             | `false`  |
-| `--output <FORMAT>`    | `text` or `json`                                                  | `text`   |
-| `--output-file <PATH>` | Write output to file                                              | —        |
-| `--color <WHEN>`       | `auto`, `always`, `never`                                         | `auto`   |
+| Option                       | Description                                                           | Default  |
+|------------------------------|-----------------------------------------------------------------------|----------|
+| `-p, --path <PATH>`          | Directory to scan (required unless `--from-report` is used)           | —        |
+| `--from-report <FILE>`       | Load duplicate groups from a JSON report instead of scanning          | —        |
+| `--min-size <BYTES>`         | Minimum file size                                                     | `1`      |
+| `--max-size <BYTES>`         | Maximum file size                                                     | —        |
+| `--sample-chunk <BYTES>`     | Read only 3 chunks (start/middle/end) of large files (0 = read fully) | `0`      |
+| `--sample-threshold <BYTES>` | Apply sampling only to files at least this large                      | `100 MB` |
+| `--ext <LIST>`               | Only these extensions (comma-separated)                               | —        |
+| `--exclude <LIST>`           | Skip paths containing these substrings                                | —        |
+| `--hidden`                   | Include hidden files                                                  | `false`  |
+| `--follow-links`             | Follow symbolic links                                                 | `false`  |
+| `--keep <STRATEGY>`          | Which file to keep: `first`, `newest`, `oldest`, `shortest`           | `first`  |
+| `--action <ACTION>`          | `report`, `trash`, `move`, `delete`, `hardlink`                       | `report` |
+| `--action-dir <DIR>`         | Destination for `move` action                                         | —        |
+| `--yes`                      | Execute destructive actions (without it: dry-run)                     | `false`  |
+| `--dry-run`                  | Force dry-run even with `--yes`                                       | `false`  |
+| `--limit <N>`                | Show only top N groups in report                                      | —        |
+| `--group-by-dir`             | Show directories with most duplicates                                 | `false`  |
+| `--output <FORMAT>`          | `text` or `json`                                                      | `text`   |
+| `--output-file <PATH>`       | Write output to file                                                  | —        |
+| `--color <WHEN>`             | `auto`, `always`, `never`                                             | `auto`   |
 
 ### Actions
 
@@ -156,6 +159,41 @@ Export JSON report to file:
 
 ```bash
 smart_file_duplicate_manager --path ~/Music --output json --output-file report.json
+```
+
+### Large file sampling (optional)
+
+By default, every candidate file is read in full. For very large files on
+slow storage this can take a long time.
+
+The `--sample-chunk <BYTES>` flag enables a faster mode: files larger than
+`--sample-threshold <BYTES>` (default 100 MB) are read in three chunks —
+beginning, middle, and end — instead of the full file.
+
+```
+sampled range = [0, chunk) + [middle, middle + chunk) + [size - chunk, size)
+middle = (size - chunk) / 2
+```
+
+**Trade-off:** this is a probabilistic check. Two files that differ only in
+an unsampled region will be reported as duplicates. Use this flag only when
+speed matters more than certainty.
+
+For safe behaviour, leave `--sample-chunk` at its default (`0`) — files are
+read in full and compared byte by byte.
+
+Example — 4 MB chunks, threshold 100 MB (fast, not guaranteed):
+
+```bash
+smart_file_duplicate_manager --path /media/data \
+    --sample-chunk 4194304 \
+    --sample-threshold 104857600
+```
+
+The report includes a note about the active sampling mode:
+
+```
+[4/5] Full hash:   14 duplicate groups, 41 files (0.02s) (sampling: 4194304 B chunks for files >= 104857600 B)
 ```
 
 ### Reusing a saved report
@@ -218,6 +256,212 @@ it is skipped and reported as an error — nothing is silently modified.
 
 - `0` — success
 - `1` — invalid arguments, path does not exist, or report cannot be loaded
+
+## Developer Guide
+
+### Build
+
+```bash
+cargo build --release
+```
+
+Binary: `target/release/smart_file_duplicate_manager`.
+
+Warnings are not expected. If any appear, investigate before committing.
+
+### Sandbox — basic (small files)
+
+```bash
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+echo "hello world" > /tmp/dupes_test/a/file1.txt
+echo "hello world" > /tmp/dupes_test/b/file1.txt
+echo "different" > /tmp/dupes_test/a/unique.txt
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=3 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
+rm -f /tmp/dupes_test.json
+```
+
+### Sandbox — sampling (large files)
+
+```bash
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
+
+# Modify middle of the third file (keeps size identical)
+dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=104000000 conv=notrunc 2>/dev/null
+rm -f /tmp/dupes_test.json
+```
+
+### Test — scan pipeline
+
+```bash
+# Default (full read, safest)
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/
+
+# Filters
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1000
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --max-size 5000000
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --ext txt
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --exclude b
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --hidden
+
+# Keep strategies
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --keep first
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --keep newest
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --keep oldest
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --keep shortest
+
+# Output
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --limit 5
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --group-by-dir
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --color never
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --output json
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --output json --output-file /tmp/dupes_test.json
+
+# Validate JSON
+python3 -c "import json; d=json.load(open('/tmp/dupes_test.json')); print('valid JSON, groups:', len(d['groups']))"
+```
+
+### Test — sampling correctness
+
+```bash
+# Difference at 1 MB (inside first chunk) → must be 0 groups
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
+dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=1000000 conv=notrunc 2>/dev/null
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --sample-chunk 4194304 --sample-threshold 104857600
+
+# Difference at 104 MB (inside middle chunk) → must be 0 groups
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
+dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=104000000 conv=notrunc 2>/dev/null
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --sample-chunk 4194304 --sample-threshold 104857600
+
+# Difference at 208 MB (inside last chunk) → must be 0 groups
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
+dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=208000000 conv=notrunc 2>/dev/null
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --sample-chunk 4194304 --sample-threshold 104857600
+
+# Identical files → must be 1 group
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
+cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --sample-chunk 4194304 --sample-threshold 104857600
+```
+
+### Test — actions (safe, on sandbox)
+
+```bash
+# Dry-run (no --yes): nothing is changed
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action trash
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action delete
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action move --action-dir /tmp/dupes_out
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action hardlink
+
+# Real trash (reversible)
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action trash --yes
+ls -la ~/.local/share/Trash/files/ | tail
+
+# Real move
+mkdir -p /tmp/dupes_out
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action move --action-dir /tmp/dupes_out --yes
+ls -la /tmp/dupes_out/
+
+# Real hardlink (same filesystem only)
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action hardlink --yes
+ls -li /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
+
+# Real delete (irreversible)
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action delete --yes
+```
+
+### Test — reuse saved report
+
+```bash
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output json --output-file /tmp/dupes_test.json
+
+./target/release/smart_file_duplicate_manager --from-report /tmp/dupes_test.json
+
+./target/release/smart_file_duplicate_manager --from-report /tmp/dupes_test.json \
+    --action trash --yes
+```
+
+### Test — validation of changed files
+
+```bash
+rm -rf /tmp/dupes_test
+mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
+echo "hello" > /tmp/dupes_test/a/file1.txt
+echo "hello" > /tmp/dupes_test/b/file1.txt
+rm -f /tmp/dupes_test.json
+
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output json --output-file /tmp/dupes_test.json
+
+# Modify the file that was going to be deleted
+echo "MODIFIED" > /tmp/dupes_test/b/file1.txt
+
+# Validation must reject the changed file
+./target/release/smart_file_duplicate_manager --from-report /tmp/dupes_test.json \
+    --action trash --yes
+```
+
+Expected: `Failed: 1`, error `size changed: expected 6, got 9`. File is not
+moved to trash.
+
+### Test — argument errors
+
+```bash
+# Both --path and --from-report
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --from-report /tmp/dupes_test.json
+
+# Neither --path nor --from-report
+./target/release/smart_file_duplicate_manager
+
+# --action move without --action-dir
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action move
+
+# Nonexistent path
+./target/release/smart_file_duplicate_manager --path /tmp/does_not_exist_xyz
+```
+
+### Test — help and version
+
+```bash
+./target/release/smart_file_duplicate_manager --help
+./target/release/smart_file_duplicate_manager -h
+./target/release/smart_file_duplicate_manager --version
+```
+
+### Regression checklist
+
+Before each commit, ensure:
+
+1. `cargo build --release` — no warnings.
+2. Default scan (`--path` only) — same output as before.
+3. `--output json` — valid JSON, no trailing text.
+4. `--output json --output-file` — valid JSON in file.
+5. `--action trash` without `--yes` — dry-run, files untouched.
+6. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
+7. `--from-report` — loads saved report, validates size and mtime.
+8. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
 
 ## License
 
