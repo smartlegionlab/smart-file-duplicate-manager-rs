@@ -20,57 +20,64 @@ const REPO_URL: &str = "https://github.com/smartlegionlab/smart-file-duplicate-m
 const PREFIX_BYTES: u64 = 4096;
 
 #[derive(Parser, Debug)]
-#[command(name = APP_NAME, version = VERSION, author = AUTHOR)]
+#[command(
+    name = APP_NAME,
+    version = VERSION,
+    author = AUTHOR,
+    about = "Fast and efficient duplicate file finder written in Rust.",
+    long_about = "Smart File Duplicate Manager finds byte-identical files in a directory tree. It uses a multi-stage algorithm: group by size, prefix hash (4 KB), full BLAKE3 hash, then byte-by-byte confirmation. Full file contents are read only for real candidates.",
+    after_help = "Repository: https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
+)]
 struct Cli {
-    #[arg(short = 'p', long = "path", value_name = "PATH")]
+    #[arg(short = 'p', long = "path", value_name = "PATH", help = "Directory to scan (required)")]
     path: PathBuf,
 
-    #[arg(long = "min-size", value_name = "BYTES", default_value_t = 1)]
+    #[arg(long = "min-size", value_name = "BYTES", default_value_t = 1, help = "Minimum file size in bytes")]
     min_size: u64,
 
-    #[arg(long = "max-size", value_name = "BYTES")]
+    #[arg(long = "max-size", value_name = "BYTES", help = "Maximum file size in bytes")]
     max_size: Option<u64>,
 
-    #[arg(long = "follow-links")]
+    #[arg(long = "follow-links", help = "Follow symbolic links during scan")]
     follow_links: bool,
 
-    #[arg(long = "hidden")]
+    #[arg(long = "hidden", help = "Include hidden files and directories")]
     hidden: bool,
 
-    #[arg(long = "ext", value_name = "LIST", value_delimiter = ',')]
+    #[arg(long = "ext", value_name = "LIST", value_delimiter = ',', help = "Only these file extensions (comma-separated)")]
     ext: Vec<String>,
 
-    #[arg(long = "exclude", value_name = "LIST", value_delimiter = ',')]
+    #[arg(long = "exclude", value_name = "LIST", value_delimiter = ',', help = "Skip paths containing these substrings (comma-separated)")]
     exclude: Vec<String>,
 
-    #[arg(long = "keep", value_enum, default_value_t = KeepStrategy::First)]
+    #[arg(long = "keep", value_enum, default_value_t = KeepStrategy::First, help = "Which file to keep in each duplicate group")]
     keep: KeepStrategy,
 
-    #[arg(long = "action", value_enum, default_value_t = Action::Report)]
+    #[arg(long = "action", value_enum, default_value_t = Action::Report, help = "What to do with duplicates")]
     action: Action,
 
-    #[arg(long = "action-dir", value_name = "DIR")]
+    #[arg(long = "action-dir", value_name = "DIR", help = "Destination directory for the move action")]
     action_dir: Option<PathBuf>,
 
-    #[arg(long = "yes")]
+    #[arg(long = "yes", help = "Execute destructive actions (otherwise dry-run)")]
     yes: bool,
 
-    #[arg(long = "dry-run")]
+    #[arg(long = "dry-run", help = "Force dry-run even with --yes")]
     dry_run: bool,
 
-    #[arg(long = "limit", value_name = "N")]
+    #[arg(long = "limit", value_name = "N", help = "Show only top N groups in the report")]
     limit: Option<usize>,
 
-    #[arg(long = "group-by-dir")]
+    #[arg(long = "group-by-dir", help = "Show directories with the most duplicates")]
     group_by_dir: bool,
 
-    #[arg(long = "output", value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long = "output", value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 
-    #[arg(long = "output-file", value_name = "PATH")]
+    #[arg(long = "output-file", value_name = "PATH", help = "Write output to a file instead of stdout")]
     output_file: Option<PathBuf>,
 
-    #[arg(long = "color", value_enum, default_value_t = ColorMode::Auto)]
+    #[arg(long = "color", value_enum, default_value_t = ColorMode::Auto, help = "Colorize output")]
     color: ColorMode,
 }
 
