@@ -307,6 +307,19 @@ rm -- /media/data/b.mp4
 }
 ```
 
+When `--output json` is combined with `--output-file`, the file contains
+pure JSON. Progress bars, phase logs, and informational messages go to
+stderr and remain visible in the terminal.
+
+### Output file cleanliness
+
+When `--output-file <PATH>` is used:
+
+- The file contains only the report (text, JSON, or shell script).
+- The program name banner and copyright footer are **not** written to the file.
+- Progress and phase logs go to the terminal (stderr), not to the file.
+- For `--output json`, the file starts with `{` and is valid JSON.
+
 ## Exit codes
 
 - `0` — success
@@ -556,7 +569,7 @@ Before each commit, ensure:
 1. `cargo build --release` — no warnings.
 2. Default scan (`--path` only) — same output as before.
 3. `--output json` — valid JSON, no trailing text.
-4. `--output json --output-file` — valid JSON in file.
+4. `--output json --output-file` — valid JSON in file, no banner or footer.
 5. `--output shell` — generates a script; `bash -n` passes.
 6. `--output shell` without `--action delete|move|hardlink` — error.
 7. `--output shell --action trash` — error.
@@ -564,6 +577,7 @@ Before each commit, ensure:
 9. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
 10. `--from-report` — loads saved report, validates size and mtime.
 11. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
+12. Phase logs and progress bars visible in terminal even with `--output-file`.
 
 ## License
 

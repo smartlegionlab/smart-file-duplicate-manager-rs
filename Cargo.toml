@@ -1,6 +1,6 @@
 [package]
 name = "smart_file_duplicate_manager"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Alexander Suvorov <smartlegionlab>"]
 description = "Fast and efficient duplicate file finder written in Rust"
