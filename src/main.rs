@@ -1688,3 +1688,241 @@ fn main() {
 
     out.flush().ok();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp_file(dir: &Path, name: &str, content: &[u8], mtime: u64) -> FileEntry {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        let meta = fs::metadata(&path).unwrap();
+        let size = meta.len();
+        FileEntry {
+            path,
+            size,
+            mtime,
+        }
+    }
+
+    #[test]
+    fn test_format_size_zero() {
+        assert_eq!(format_size(0), "0 B");
+    }
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(1), "1 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_size_kb() {
+        assert_eq!(format_size(1024), "1.00 KB");
+        assert_eq!(format_size(2048), "2.00 KB");
+    }
+
+    #[test]
+    fn test_format_size_mb() {
+        assert_eq!(format_size(1024 * 1024), "1.00 MB");
+    }
+
+    #[test]
+    fn test_format_size_gb() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.00 GB");
+    }
+
+    #[test]
+    fn test_shell_quote_simple() {
+        let p = PathBuf::from("/tmp/file.txt");
+        assert_eq!(shell_quote(&p), "/tmp/file.txt");
+    }
+
+    #[test]
+    fn test_shell_quote_with_spaces() {
+        let p = PathBuf::from("/tmp/my file.txt");
+        assert_eq!(shell_quote(&p), "'/tmp/my file.txt'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_quote() {
+        let p = PathBuf::from("/tmp/it's.txt");
+        assert_eq!(shell_quote(&p), "'/tmp/it'\\''s.txt'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_unicode() {
+        let p = PathBuf::from("/tmp/файл.txt");
+        assert_eq!(shell_quote(&p), "/tmp/файл.txt");
+    }
+
+    #[test]
+    fn test_pick_keeper_first() {
+        let a = FileEntry { path: PathBuf::from("/a/z"), size: 10, mtime: 100 };
+        let b = FileEntry { path: PathBuf::from("/a/a"), size: 10, mtime: 200 };
+        let group = vec![a, b];
+        let idx = pick_keeper(&group, KeepStrategy::First);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_pick_keeper_newest() {
+        let a = FileEntry { path: PathBuf::from("/a/x"), size: 10, mtime: 100 };
+        let b = FileEntry { path: PathBuf::from("/a/y"), size: 10, mtime: 200 };
+        let group = vec![a, b];
+        let idx = pick_keeper(&group, KeepStrategy::Newest);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_pick_keeper_oldest() {
+        let a = FileEntry { path: PathBuf::from("/a/x"), size: 10, mtime: 100 };
+        let b = FileEntry { path: PathBuf::from("/a/y"), size: 10, mtime: 200 };
+        let group = vec![a, b];
+        let idx = pick_keeper(&group, KeepStrategy::Oldest);
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_pick_keeper_shortest() {
+        let a = FileEntry { path: PathBuf::from("/very/long/path/x"), size: 10, mtime: 100 };
+        let b = FileEntry { path: PathBuf::from("/short"), size: 10, mtime: 100 };
+        let group = vec![a, b];
+        let idx = pick_keeper(&group, KeepStrategy::Shortest);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_files_equal_identical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp_file(tmp.path(), "a", b"hello world", 100);
+        let b = tmp_file(tmp.path(), "b", b"hello world", 100);
+        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        assert!(files_equal(&a, &b, sample));
+    }
+
+    #[test]
+    fn test_files_equal_different_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp_file(tmp.path(), "a", b"hello", 100);
+        let b = tmp_file(tmp.path(), "b", b"world", 100);
+        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        assert!(!files_equal(&a, &b, sample));
+    }
+
+    #[test]
+    fn test_files_equal_different_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp_file(tmp.path(), "a", b"hello", 100);
+        let b = tmp_file(tmp.path(), "b", b"hello world", 100);
+        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        assert!(!files_equal(&a, &b, sample));
+    }
+
+    #[test]
+    fn test_validate_entry_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = tmp_file(tmp.path(), "a", b"hello", 100);
+        let real_mtime = fs::metadata(&entry.path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let entry = FileEntry { mtime: real_mtime, ..entry };
+        assert!(validate_entry(&entry).is_ok());
+    }
+
+    #[test]
+    fn test_validate_entry_size_changed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut entry = tmp_file(tmp.path(), "a", b"hello", 100);
+        entry.size = 999;
+        let err = validate_entry(&entry).unwrap_err();
+        assert!(err.contains("size changed"));
+    }
+
+    #[test]
+    fn test_validate_entry_missing() {
+        let entry = FileEntry {
+            path: PathBuf::from("/tmp/does_not_exist_xyz_12345"),
+            size: 10,
+            mtime: 100,
+        };
+        let err = validate_entry(&entry).unwrap_err();
+        assert!(err.contains("not accessible"));
+    }
+
+    #[test]
+    fn test_sample_should_sample_disabled() {
+        let s = SampleConfig { chunk: 0, threshold: 100 };
+        assert!(!s.should_sample(1_000_000));
+        assert!(!s.active());
+    }
+
+    #[test]
+    fn test_sample_should_sample_below_threshold() {
+        let s = SampleConfig { chunk: 1024, threshold: 100_000 };
+        assert!(!s.should_sample(50_000));
+        assert!(s.active());
+    }
+
+    #[test]
+    fn test_sample_should_sample_at_threshold() {
+        let s = SampleConfig { chunk: 1024, threshold: 100_000 };
+        assert!(s.should_sample(100_000));
+    }
+
+    #[test]
+    fn test_is_leap_year() {
+        assert!(is_leap_year(2000));
+        assert!(is_leap_year(2024));
+        assert!(!is_leap_year(2023));
+        assert!(!is_leap_year(1900));
+        assert!(is_leap_year(1600));
+    }
+
+    #[test]
+    fn test_load_groups_from_json_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("report.json");
+        let json = r#"{
+            "path": "/tmp/test",
+            "keep_strategy": "First",
+            "action": "Report",
+            "groups": [
+                {
+                    "index": 1,
+                    "size": 100,
+                    "wasted": 100,
+                    "keep": {"path": "/a", "size": 100, "mtime": 1},
+                    "delete": [{"path": "/b", "size": 100, "mtime": 1}]
+                }
+            ],
+            "total_groups": 1,
+            "total_files": 2,
+            "total_wasted": 100
+        }"#;
+        fs::write(&path, json).unwrap();
+        let groups = load_groups_from_json(&path).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].size, 100);
+        assert_eq!(groups[0].delete.len(), 1);
+    }
+
+    #[test]
+    fn test_load_groups_from_json_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bad.json");
+        fs::write(&path, "not json").unwrap();
+        assert!(load_groups_from_json(&path).is_err());
+    }
+
+    #[test]
+    fn test_load_groups_from_json_missing_file() {
+        let path = PathBuf::from("/tmp/does_not_exist_xyz_12345.json");
+        assert!(load_groups_from_json(&path).is_err());
+    }
+}
