@@ -15,7 +15,7 @@ const APP_NAME: &str = "Smart File Duplicate Manager";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const AUTHOR: &str = "Alexander Suvorov";
 const GITHUB: &str = "smartlegionlab";
-const REPO_URL: &str = "https://github.com/smartlegionlab";
+const REPO_URL: &str = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs";
 
 const PREFIX_BYTES: u64 = 4096;
 

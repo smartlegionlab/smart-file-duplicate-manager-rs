@@ -3,9 +3,9 @@ name = "smart_file_duplicate_manager"
 version = "0.1.0"
 edition = "2021"
 authors = ["Alexander Suvorov <smartlegionlab>"]
-description = "Smart File Duplicate Manager"
-repository = "https://github.com/smartlegionlab/smart_file_duplicate_manager"
-license = "MIT"
+description = "Fast and efficient duplicate file finder written in Rust"
+repository = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
+license = "BSD-3-Clause"
 
 [dependencies]
 blake3 = "1.5"
