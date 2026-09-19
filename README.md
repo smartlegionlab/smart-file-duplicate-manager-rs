@@ -163,6 +163,183 @@ Export JSON report to file:
 smart_file_duplicate_manager --path ~/Music --output json --output-file report.json
 ```
 
+## Command cheat sheet
+
+Quick reference for common tasks. Copy-paste and adapt the paths.
+
+### Scan and report
+
+```bash
+# Report duplicates in a directory (safe, nothing is deleted)
+smart_file_duplicate_manager --path ~/Downloads
+
+# Report duplicates in current directory
+smart_file_duplicate_manager --path .
+
+# Only files larger than 100 MB
+smart_file_duplicate_manager --path ~/Videos --min-size 104857600
+
+# Only files between 10 MB and 1 GB
+smart_file_duplicate_manager --path ~/Videos --min-size 10485760 --max-size 1073741824
+
+# Only images
+smart_file_duplicate_manager --path ~/Photos --ext jpg,jpeg,png,heic
+
+# Only .zip archives
+smart_file_duplicate_manager --path ~/Downloads --ext zip
+
+# Exclude .git and node_modules
+smart_file_duplicate_manager --path ~/Projects --exclude .git,node_modules,target
+
+# Include hidden files
+smart_file_duplicate_manager --path ~/Documents --hidden
+
+# Show top 10 groups only
+smart_file_duplicate_manager --path ~/Music --limit 10
+
+# Show directories with the most duplicates
+smart_file_duplicate_manager --path ~/Videos --group-by-dir
+
+# No color (for logs or files)
+smart_file_duplicate_manager --path ~/Downloads --color never
+```
+
+### Keep strategies
+
+```bash
+# Keep the first by path (alphabetical)
+smart_file_duplicate_manager --path ~/Photos --keep first
+
+# Keep the most recently modified
+smart_file_duplicate_manager --path ~/Photos --keep newest
+
+# Keep the oldest by modification time
+smart_file_duplicate_manager --path ~/Photos --keep oldest
+
+# Keep the file with the shortest path
+smart_file_duplicate_manager --path ~/Photos --keep shortest
+```
+
+### Output formats
+
+```bash
+# Text (default)
+smart_file_duplicate_manager --path ~/Downloads
+
+# JSON to stdout
+smart_file_duplicate_manager --path ~/Downloads --output json
+
+# JSON to file
+smart_file_duplicate_manager --path ~/Downloads --output json --output-file /tmp/dupes.json
+
+# Shell script for review (requires --action delete|move|hardlink)
+smart_file_duplicate_manager --path ~/Downloads --action delete --output shell
+
+# Shell script to file
+smart_file_duplicate_manager --path ~/Downloads --action delete --output shell --output-file /tmp/cleanup.sh
+```
+
+### Actions (dry-run by default)
+
+```bash
+# Dry-run (no changes, just the plan)
+smart_file_duplicate_manager --path ~/Downloads --action trash
+smart_file_duplicate_manager --path ~/Downloads --action delete
+smart_file_duplicate_manager --path ~/Downloads --action move --action-dir /tmp/dupes_out
+smart_file_duplicate_manager --path ~/Downloads --action hardlink
+
+# Move duplicates to ~/.local/share/Trash (reversible)
+smart_file_duplicate_manager --path ~/Downloads --action trash --yes
+
+# Move duplicates to a custom folder
+smart_file_duplicate_manager --path ~/Downloads --action move --action-dir /tmp/dupes_out --yes
+
+# Replace duplicates with hard links to the kept file (same filesystem only)
+smart_file_duplicate_manager --path ~/Downloads --action hardlink --yes
+
+# Permanently delete duplicates (irreversible)
+smart_file_duplicate_manager --path ~/Downloads --action delete --yes
+```
+
+### Fast mode for large files
+
+```bash
+# Sample 3 chunks per large file (fast, not guaranteed)
+smart_file_duplicate_manager --path /media/data --sample-chunk 4194304
+
+# Sample only files >= 500 MB, with 4 MB chunks
+smart_file_duplicate_manager --path /media/data \
+    --min-size 524288000 \
+    --sample-chunk 4194304 \
+    --sample-threshold 524288000
+```
+
+### Reuse a saved report (no rescanning)
+
+```bash
+# Step 1: scan once and save
+smart_file_duplicate_manager --path /media/data \
+    --min-size 104857600 \
+    --output json --output-file /tmp/dupes.json
+
+# Step 2: inspect the plan (instant)
+smart_file_duplicate_manager --from-report /tmp/dupes.json
+
+# Step 3: apply an action (still dry-run unless --yes is given)
+smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash
+
+# Step 4: execute
+smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --yes
+```
+
+### Common real-world examples
+
+```bash
+# Clean duplicates in Downloads (report only)
+smart_file_duplicate_manager --path ~/Downloads
+
+# Find duplicate movies larger than 1 GB, preview trash plan
+smart_file_duplicate_manager --path ~/Videos --min-size 1073741824 --action trash
+
+# Find duplicate .zip archives larger than 300 MB
+smart_file_duplicate_manager --path /media/data --min-size 314572800 --ext zip
+
+# Find duplicate .iso images larger than 1 GB, save report
+smart_file_duplicate_manager --path /media/data \
+    --min-size 1073741824 --ext iso \
+    --output json --output-file /tmp/iso_dupes.json
+
+# Fast scan of a huge disk for large-file duplicates
+smart_file_duplicate_manager --path /media/data \
+    --min-size 524288000 \
+    --sample-chunk 4194304 \
+    --group-by-dir
+
+# Scan music library, keep the newest copy of each track
+smart_file_duplicate_manager --path ~/Music --ext mp3,flac,ogg --keep newest
+
+# Scan photo library, exclude RAW cache folders
+smart_file_duplicate_manager --path ~/Photos --ext jpg,jpeg,png --exclude .cache
+
+# Safe cleanup: move duplicates to a review folder, then decide manually
+mkdir -p /tmp/dupes_review
+smart_file_duplicate_manager --path ~/Downloads \
+    --action move --action-dir /tmp/dupes_review --yes
+```
+
+### Help and version
+
+```bash
+# Full help
+smart_file_duplicate_manager --help
+
+# Short help
+smart_file_duplicate_manager -h
+
+# Version
+smart_file_duplicate_manager --version
+```
+
 ### Large file sampling (optional)
 
 By default, every candidate file is read in full. For very large files on
