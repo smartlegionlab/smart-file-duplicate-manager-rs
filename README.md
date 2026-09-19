@@ -43,6 +43,7 @@ that avoids reading entire files unless necessary.
 - Filters: extension, path exclusion, size range, hidden files
 - Colored output (ANSI, no external color crates)
 - Progress bars for long operations
+- Unit and integration tests (42 tests)
 
 ## Algorithm
 
@@ -347,6 +348,27 @@ cargo build --release
 cargo clean && cargo build --release
 ```
 
+### Tests
+
+```bash
+cargo test
+```
+
+Runs unit tests (in `src/main.rs`) and integration tests (in
+`tests/integration.rs`). All tests run in isolated temporary directories and
+never touch real files.
+
+- **Unit tests** cover `format_size`, `shell_quote`, `pick_keeper`,
+  `files_equal`, `validate_entry`, `load_groups_from_json`, `SampleConfig`,
+  `is_leap_year`.
+- **Integration tests** exercise the compiled binary via `assert_cmd`:
+  scanning, JSON output, JSON file cleanliness, `--from-report`, dry-run,
+  argument errors, shell output, filters, keep strategies.
+
+Dev-dependencies: `assert_cmd`, `predicates`, `tempfile`.
+
+Before committing, ensure `cargo test` is fully green.
+
 ### Sandbox — basic (small files)
 
 ```bash
@@ -567,17 +589,18 @@ moved to trash.
 Before each commit, ensure:
 
 1. `cargo build --release` — no warnings.
-2. Default scan (`--path` only) — same output as before.
-3. `--output json` — valid JSON, no trailing text.
-4. `--output json --output-file` — valid JSON in file, no banner or footer.
-5. `--output shell` — generates a script; `bash -n` passes.
-6. `--output shell` without `--action delete|move|hardlink` — error.
-7. `--output shell --action trash` — error.
-8. `--action trash` without `--yes` — dry-run, files untouched.
-9. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
-10. `--from-report` — loads saved report, validates size and mtime.
-11. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
-12. Phase logs and progress bars visible in terminal even with `--output-file`.
+2. `cargo test` — all tests pass.
+3. Default scan (`--path` only) — same output as before.
+4. `--output json` — valid JSON, no trailing text.
+5. `--output json --output-file` — valid JSON in file, no banner or footer.
+6. `--output shell` — generates a script; `bash -n` passes.
+7. `--output shell` without `--action delete|move|hardlink` — error.
+8. `--output shell --action trash` — error.
+9. `--action trash` without `--yes` — dry-run, files untouched.
+10. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
+11. `--from-report` — loads saved report, validates size and mtime.
+12. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
+13. Phase logs and progress bars visible in terminal even with `--output-file`.
 
 ## License
 
