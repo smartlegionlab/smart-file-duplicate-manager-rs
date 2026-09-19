@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -75,6 +75,9 @@ struct Cli {
     #[arg(long = "dry-run", help = "Force dry-run even with --yes")]
     dry_run: bool,
 
+    #[arg(long = "interactive", help = "Ask confirmation for each file (requires a TTY)")]
+    interactive: bool,
+
     #[arg(long = "limit", value_name = "N", help = "Show only top N groups in the report")]
     limit: Option<usize>,
 
@@ -133,6 +136,7 @@ struct FileEntry {
 struct ActionSummary {
     processed: u64,
     failed: u64,
+    skipped: u64,
     bytes_freed: u64,
     errors: Vec<String>,
 }
@@ -250,6 +254,42 @@ impl SampleConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfirmChoice {
+    Yes,
+    No,
+    All,
+    Quit,
+}
+
+fn parse_confirm(input: &str) -> ConfirmChoice {
+    let s = input.trim().to_lowercase();
+    match s.as_str() {
+        "y" | "yes" => ConfirmChoice::Yes,
+        "a" | "all" => ConfirmChoice::All,
+        "q" | "quit" => ConfirmChoice::Quit,
+        _ => ConfirmChoice::No,
+    }
+}
+
+fn ask_confirm(index: usize, total: usize, action: Action, path: &Path) -> ConfirmChoice {
+    eprint!(
+        "[{}/{}] {:?} {}? [y/N/a/q] ",
+        index,
+        total,
+        action,
+        path.display()
+    );
+    std::io::stderr().flush().ok();
+
+    let mut input = String::new();
+    match std::io::stdin().lock().read_line(&mut input) {
+        Ok(0) => ConfirmChoice::Quit,
+        Ok(_) => parse_confirm(&input),
+        Err(_) => ConfirmChoice::Quit,
+    }
+}
+
 fn current_year() -> u64 {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -280,10 +320,7 @@ fn should_colorize(mode: ColorMode) -> bool {
     match mode {
         ColorMode::Always => true,
         ColorMode::Never => false,
-        ColorMode::Auto => {
-            use std::io::IsTerminal;
-            std::io::stdout().is_terminal()
-        }
+        ColorMode::Auto => std::io::stdout().is_terminal(),
     }
 }
 
@@ -1366,6 +1403,7 @@ fn perform_actions(
     dry_run: bool,
     quiet: bool,
     validate: bool,
+    interactive: bool,
 ) -> ActionSummary {
     let mut summary = ActionSummary::default();
 
@@ -1391,7 +1429,7 @@ fn perform_actions(
         return summary;
     }
 
-    let pb = if quiet {
+    let pb = if quiet || interactive {
         None
     } else {
         Some(action_bar(
@@ -1400,7 +1438,29 @@ fn perform_actions(
         ))
     };
 
-    for (victim, keeper) in actions {
+    let total = actions.len();
+    let mut interactive_all = false;
+
+    for (i, (victim, keeper)) in actions.iter().enumerate() {
+        if interactive && !interactive_all {
+            match ask_confirm(i + 1, total, action, &victim.path) {
+                ConfirmChoice::Yes => {}
+                ConfirmChoice::No => {
+                    summary.skipped += 1;
+                    continue;
+                }
+                ConfirmChoice::All => {
+                    interactive_all = true;
+                }
+                ConfirmChoice::Quit => {
+                    if !quiet {
+                        eprintln!("Interrupted by user.");
+                    }
+                    break;
+                }
+            }
+        }
+
         if validate {
             if let Err(e) = validate_entry(victim) {
                 summary.failed += 1;
@@ -1477,6 +1537,17 @@ fn main() {
         }
         if cli.action == Action::Move && cli.action_dir.is_none() {
             eprintln!("Error: --output shell with move requires --action-dir");
+            std::process::exit(1);
+        }
+    }
+
+    if cli.interactive {
+        if shell_output {
+            eprintln!("Error: --interactive cannot be combined with --output shell");
+            std::process::exit(1);
+        }
+        if !std::io::stdin().is_terminal() {
+            eprintln!("Error: --interactive requires a TTY (stdin is not a terminal)");
             std::process::exit(1);
         }
     }
@@ -1635,11 +1706,18 @@ fn main() {
         if use_validation {
             writeln!(out, "Validation:       enabled (checking size and mtime)").ok();
         }
+        if cli.interactive {
+            writeln!(
+                out,
+                "Interactive:      yes (y = do, n = skip, a = all, q = quit)"
+            )
+            .ok();
+        }
     }
 
-    let dry_run = cli.dry_run || !cli.yes;
+    let dry_run = cli.dry_run || (!cli.yes && !cli.interactive);
 
-    if !cli.yes && !cli.dry_run && !quiet {
+    if !cli.yes && !cli.dry_run && !cli.interactive && !quiet {
         writeln!(out).ok();
         writeln!(out, "This is a dry run. To execute, add --yes").ok();
     }
@@ -1651,6 +1729,7 @@ fn main() {
         dry_run,
         quiet,
         use_validation,
+        cli.interactive,
     );
 
     if !quiet {
@@ -1666,6 +1745,7 @@ fn main() {
             .ok();
         } else {
             writeln!(out, "Processed: {}", summary.processed).ok();
+            writeln!(out, "Skipped:   {}", summary.skipped).ok();
             writeln!(out, "Failed:    {}", summary.failed).ok();
             writeln!(out, "Freed:     {}", format_size(summary.bytes_freed)).ok();
         }
@@ -1924,5 +2004,33 @@ mod tests {
     fn test_load_groups_from_json_missing_file() {
         let path = PathBuf::from("/tmp/does_not_exist_xyz_12345.json");
         assert!(load_groups_from_json(&path).is_err());
+    }
+
+    #[test]
+    fn test_parse_confirm_yes() {
+        assert_eq!(parse_confirm("y"), ConfirmChoice::Yes);
+        assert_eq!(parse_confirm("Y"), ConfirmChoice::Yes);
+        assert_eq!(parse_confirm("yes"), ConfirmChoice::Yes);
+        assert_eq!(parse_confirm("  YES  "), ConfirmChoice::Yes);
+    }
+
+    #[test]
+    fn test_parse_confirm_no() {
+        assert_eq!(parse_confirm("n"), ConfirmChoice::No);
+        assert_eq!(parse_confirm("no"), ConfirmChoice::No);
+        assert_eq!(parse_confirm(""), ConfirmChoice::No);
+        assert_eq!(parse_confirm("garbage"), ConfirmChoice::No);
+    }
+
+    #[test]
+    fn test_parse_confirm_all() {
+        assert_eq!(parse_confirm("a"), ConfirmChoice::All);
+        assert_eq!(parse_confirm("ALL"), ConfirmChoice::All);
+    }
+
+    #[test]
+    fn test_parse_confirm_quit() {
+        assert_eq!(parse_confirm("q"), ConfirmChoice::Quit);
+        assert_eq!(parse_confirm("quit"), ConfirmChoice::Quit);
     }
 }

@@ -271,3 +271,37 @@ fn test_output_file_no_banner() {
         "footer must not be in the file"
     );
 }
+
+#[test]
+fn test_interactive_requires_tty() {
+    let dir = make_sandbox();
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--action",
+            "trash",
+            "--interactive",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--interactive requires a TTY"));
+}
+
+#[test]
+fn test_interactive_with_shell_output_rejected() {
+    let dir = make_sandbox();
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--output",
+            "shell",
+            "--action",
+            "delete",
+            "--interactive",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--interactive cannot be combined with --output shell"));
+}
