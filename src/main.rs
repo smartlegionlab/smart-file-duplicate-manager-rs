@@ -1,7 +1,7 @@
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 const APP_NAME: &str = "Smart File Duplicate Manager";
@@ -15,6 +15,9 @@ const REPO_URL: &str = "https://github.com/smartlegionlab";
 struct Cli {
     #[arg(short = 'p', long = "path", value_name = "PATH")]
     path: PathBuf,
+
+    #[arg(long = "count", help = "Only count files and directories (step 1)")]
+    count: bool,
 }
 
 #[derive(Debug, Default)]
@@ -72,11 +75,15 @@ fn make_progress_bar() -> ProgressBar {
     pb
 }
 
-fn scan_directory(path: &Path) -> ScanReport {
+fn step_count(path: &Path) -> ScanReport {
+    println!("[Step 1] Recursive directory scan and count");
+    println!("Scanning directory: {}", path.display());
+    println!();
+
     let mut report = ScanReport::default();
     let pb = make_progress_bar();
 
-    let mut last_update = std::time::Instant::now();
+    let mut last_update = Instant::now();
     let update_interval = Duration::from_millis(100);
 
     for entry in WalkDir::new(path).follow_links(false) {
@@ -98,19 +105,20 @@ fn scan_directory(path: &Path) -> ScanReport {
 
         if last_update.elapsed() >= update_interval {
             pb.set_message(format!("{}  dirs: {}", report.files, report.dirs));
-            last_update = std::time::Instant::now();
+            last_update = Instant::now();
         }
     }
 
     pb.finish_and_clear();
+
+    println!("Directories found: {}", report.dirs);
+    println!("Files found:       {}", report.files);
+
     report
 }
 
-fn print_report(path: &Path, report: &ScanReport) {
-    println!("Scanning directory: {}", path.display());
-    println!();
-    println!("Directories found: {}", report.dirs);
-    println!("Files found:       {}", report.files);
+fn run_all(path: &Path) {
+    step_count(path);
 }
 
 fn main() {
@@ -130,8 +138,11 @@ fn main() {
         std::process::exit(1);
     }
 
-    let report = scan_directory(path);
-    print_report(path, &report);
+    if cli.count {
+        step_count(path);
+    } else {
+        run_all(path);
+    }
 
     print_footer();
 }
