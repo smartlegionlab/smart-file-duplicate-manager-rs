@@ -1,4 +1,4 @@
-# Smart File Duplicate Manager
+# Smart File Duplicate Manager (Rust) <sup>v0.1.0</sup>
 
 Fast and efficient duplicate file finder written in Rust.
 
