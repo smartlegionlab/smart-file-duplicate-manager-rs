@@ -33,6 +33,7 @@ that avoids reading entire files unless necessary.
 - BLAKE3 hashing with parallel processing (rayon)
 - Four strategies for choosing which file to keep
 - Five actions: report, trash, move, delete, hardlink
+- Interactive mode: confirm each file before action
 - Dry-run by default for destructive actions
 - XDG-compliant trash (reversible)
 - JSON output for scripting and integration
@@ -43,7 +44,7 @@ that avoids reading entire files unless necessary.
 - Filters: extension, path exclusion, size range, hidden files
 - Colored output (ANSI, no external color crates)
 - Progress bars for long operations
-- Unit and integration tests (42 tests)
+- Unit and integration tests (48 tests)
 
 ## Algorithm
 
@@ -103,6 +104,7 @@ smart_file_duplicate_manager -p ~/Pictures
 | `--action-dir <DIR>`         | Destination for `move` action                                                          | —        |
 | `--yes`                      | Execute destructive actions (without it: dry-run)                                      | `false`  |
 | `--dry-run`                  | Force dry-run even with `--yes`                                                        | `false`  |
+| `--interactive`              | Ask confirmation for each file (requires a TTY)                                        | `false`  |
 | `--limit <N>`                | Show only top N groups in report                                                       | —        |
 | `--group-by-dir`             | Show directories with most duplicates                                                  | `false`  |
 | `--output <FORMAT>`          | `text`, `json`, or `shell` (shell requires `--action delete\|move\|hardlink`)          | `text`   |
@@ -117,8 +119,37 @@ smart_file_duplicate_manager -p ~/Pictures
 - **delete** — permanently remove duplicates
 - **hardlink** — replace duplicates with hard links to the kept file
 
-Without `--yes`, every action except `report` runs in dry-run mode and prints
-the plan without touching files.
+Without `--yes` (and without `--interactive`), every action except `report`
+runs in dry-run mode and prints the plan without touching files.
+
+### Interactive mode
+
+Instead of `--yes` (which confirms everything at once), use `--interactive` to
+confirm each file individually:
+
+```bash
+smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
+```
+
+For each file you will be prompted:
+
+```
+[1/13] Trash /path/to/file.mp4? [y/N/a/q]
+```
+
+- `y` — do it.
+- `n` (or Enter) — skip this file.
+- `a` — apply to all remaining files without asking.
+- `q` — quit.
+
+Rules:
+
+- Requires a TTY (stdin must be a terminal). Cannot be used in scripts or pipes.
+- Cannot be combined with `--output shell` (the script is already reviewable).
+- Overrides `--yes` when both are given (interactive is stricter).
+- Dry-run overrides `--interactive` (no questions asked).
+- If a file changed since the scan (`--from-report`), validation rejects it
+  before the prompt — such files are reported as errors.
 
 ### Examples
 
@@ -155,6 +186,12 @@ Execute trash operation:
 
 ```bash
 smart_file_duplicate_manager --path ~/Downloads --action trash --yes
+```
+
+Execute trash operation with per-file confirmation:
+
+```bash
+smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
 ```
 
 Export JSON report to file:
@@ -261,6 +298,27 @@ smart_file_duplicate_manager --path ~/Downloads --action hardlink --yes
 smart_file_duplicate_manager --path ~/Downloads --action delete --yes
 ```
 
+### Interactive mode
+
+```bash
+# Confirm each file individually (requires a TTY)
+smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
+
+# Interactive with a saved report (no rescanning)
+smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --interactive
+
+# Interactive move
+smart_file_duplicate_manager --path ~/Downloads \
+    --action move --action-dir /tmp/dupes_review --interactive
+```
+
+Prompt keys:
+
+- `y` — do it
+- `n` or Enter — skip
+- `a` — apply to all remaining
+- `q` — quit
+
 ### Fast mode for large files
 
 ```bash
@@ -290,6 +348,10 @@ smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash
 
 # Step 4: execute
 smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --yes
+
+# Step 4 alt: execute with per-file confirmation
+smart_file_duplicate_manager --from-report /tmp/dupes.json \
+    --action trash --interactive
 ```
 
 ### Common real-world examples
@@ -537,10 +599,11 @@ never touch real files.
 
 - **Unit tests** cover `format_size`, `shell_quote`, `pick_keeper`,
   `files_equal`, `validate_entry`, `load_groups_from_json`, `SampleConfig`,
-  `is_leap_year`.
+  `is_leap_year`, `parse_confirm`.
 - **Integration tests** exercise the compiled binary via `assert_cmd`:
   scanning, JSON output, JSON file cleanliness, `--from-report`, dry-run,
-  argument errors, shell output, filters, keep strategies.
+  argument errors, shell output, filters, keep strategies, interactive TTY
+  requirement, `--interactive` + `--output shell` conflict.
 
 Dev-dependencies: `assert_cmd`, `predicates`, `tempfile`.
 
@@ -668,6 +731,29 @@ ls -li /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action delete --yes
 ```
 
+### Test — interactive mode
+
+```bash
+# Basic interactive (must be run in a real terminal, not a pipe)
+./target/release/smart_file_duplicate_manager \
+    --path /tmp/dupes_test/ --action trash --interactive
+
+# Interactive with a saved report
+./target/release/smart_file_duplicate_manager \
+    --path /tmp/dupes_test/ --output json --output-file /tmp/dupes_test.json
+
+./target/release/smart_file_duplicate_manager \
+    --from-report /tmp/dupes_test.json --action trash --interactive
+
+# Must fail when stdin is not a TTY (in tests, pipes, scripts)
+echo | ./target/release/smart_file_duplicate_manager \
+    --path /tmp/dupes_test/ --action trash --interactive
+
+# Must fail when combined with shell output
+./target/release/smart_file_duplicate_manager \
+    --path /tmp/dupes_test/ --output shell --action delete --interactive
+```
+
 ### Test — shell output
 
 ```bash
@@ -778,6 +864,8 @@ Before each commit, ensure:
 11. `--from-report` — loads saved report, validates size and mtime.
 12. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
 13. Phase logs and progress bars visible in terminal even with `--output-file`.
+14. `--interactive` without TTY — error.
+15. `--interactive` + `--output shell` — error.
 
 ## License
 
