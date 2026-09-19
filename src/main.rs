@@ -1,6 +1,7 @@
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 const APP_NAME: &str = "Smart File Duplicate Manager";
@@ -60,8 +61,23 @@ fn print_footer() {
     println!("Repo: {}", REPO_URL);
 }
 
+fn make_progress_bar() -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} files: {msg}")
+            .unwrap()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb
+}
+
 fn scan_directory(path: &Path) -> ScanReport {
     let mut report = ScanReport::default();
+    let pb = make_progress_bar();
+
+    let mut last_update = std::time::Instant::now();
+    let update_interval = Duration::from_millis(100);
 
     for entry in WalkDir::new(path).follow_links(false) {
         let entry = match entry {
@@ -73,13 +89,20 @@ fn scan_directory(path: &Path) -> ScanReport {
             continue;
         }
 
-        if entry.file_type().is_dir() {
+        let ft = entry.file_type();
+        if ft.is_dir() {
             report.dirs += 1;
-        } else if entry.file_type().is_file() {
+        } else if ft.is_file() {
             report.files += 1;
+        }
+
+        if last_update.elapsed() >= update_interval {
+            pb.set_message(format!("{}  dirs: {}", report.files, report.dirs));
+            last_update = std::time::Instant::now();
         }
     }
 
+    pb.finish_and_clear();
     report
 }
 

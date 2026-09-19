@@ -9,4 +9,5 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
 walkdir = "2.5"
