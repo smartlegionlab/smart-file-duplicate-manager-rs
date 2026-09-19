@@ -1,4 +1,4 @@
-# Smart File Duplicate Manager (Rust) <sup>v0.1.0</sup>
+# Smart File Duplicate Manager (Rust)
 
 Fast and efficient duplicate file finder written in Rust.
 
@@ -36,6 +36,8 @@ that avoids reading entire files unless necessary.
 - Dry-run by default for destructive actions
 - XDG-compliant trash (reversible)
 - JSON output for scripting and integration
+- Reusable JSON reports: apply actions later without rescanning
+- Size and mtime validation when applying actions from a saved report
 - Filters: extension, path exclusion, size range, hidden files
 - Colored output (ANSI, no external color crates)
 - Progress bars for long operations
@@ -69,6 +71,7 @@ Binary: `target/release/smart_file_duplicate_manager`
 
 ```
 smart_file_duplicate_manager --path <PATH> [OPTIONS]
+smart_file_duplicate_manager --from-report <FILE> [OPTIONS]
 ```
 
 ### Basic
@@ -80,25 +83,26 @@ smart_file_duplicate_manager -p ~/Pictures
 
 ### Options
 
-| Option                 | Description                                                 | Default  |
-|------------------------|-------------------------------------------------------------|----------|
-| `-p, --path <PATH>`    | Directory to scan (required)                                | —        |
-| `--min-size <BYTES>`   | Minimum file size                                           | `1`      |
-| `--max-size <BYTES>`   | Maximum file size                                           | —        |
-| `--ext <LIST>`         | Only these extensions (comma-separated)                     | —        |
-| `--exclude <LIST>`     | Skip paths containing these substrings                      | —        |
-| `--hidden`             | Include hidden files                                        | `false`  |
-| `--follow-links`       | Follow symbolic links                                       | `false`  |
-| `--keep <STRATEGY>`    | Which file to keep: `first`, `newest`, `oldest`, `shortest` | `first`  |
-| `--action <ACTION>`    | `report`, `trash`, `move`, `delete`, `hardlink`             | `report` |
-| `--action-dir <DIR>`   | Destination for `move` action                               | —        |
-| `--yes`                | Execute destructive actions (without it: dry-run)           | `false`  |
-| `--dry-run`            | Force dry-run even with `--yes`                             | `false`  |
-| `--limit <N>`          | Show only top N groups in report                            | —        |
-| `--group-by-dir`       | Show directories with most duplicates                       | `false`  |
-| `--output <FORMAT>`    | `text` or `json`                                            | `text`   |
-| `--output-file <PATH>` | Write output to file                                        | —        |
-| `--color <WHEN>`       | `auto`, `always`, `never`                                   | `auto`   |
+| Option                 | Description                                                       | Default  |
+|------------------------|-------------------------------------------------------------------|----------|
+| `-p, --path <PATH>`    | Directory to scan (required unless `--from-report` is used)       | —        |
+| `--from-report <FILE>` | Load duplicate groups from a JSON report instead of scanning      | —        |
+| `--min-size <BYTES>`   | Minimum file size                                                 | `1`      |
+| `--max-size <BYTES>`   | Maximum file size                                                 | —        |
+| `--ext <LIST>`         | Only these extensions (comma-separated)                           | —        |
+| `--exclude <LIST>`     | Skip paths containing these substrings                            | —        |
+| `--hidden`             | Include hidden files                                              | `false`  |
+| `--follow-links`       | Follow symbolic links                                             | `false`  |
+| `--keep <STRATEGY>`    | Which file to keep: `first`, `newest`, `oldest`, `shortest`       | `first`  |
+| `--action <ACTION>`    | `report`, `trash`, `move`, `delete`, `hardlink`                   | `report` |
+| `--action-dir <DIR>`   | Destination for `move` action                                     | —        |
+| `--yes`                | Execute destructive actions (without it: dry-run)                 | `false`  |
+| `--dry-run`            | Force dry-run even with `--yes`                                   | `false`  |
+| `--limit <N>`          | Show only top N groups in report                                  | —        |
+| `--group-by-dir`       | Show directories with most duplicates                             | `false`  |
+| `--output <FORMAT>`    | `text` or `json`                                                  | `text`   |
+| `--output-file <PATH>` | Write output to file                                              | —        |
+| `--color <WHEN>`       | `auto`, `always`, `never`                                         | `auto`   |
 
 ### Actions
 
@@ -154,6 +158,30 @@ Export JSON report to file:
 smart_file_duplicate_manager --path ~/Music --output json --output-file report.json
 ```
 
+### Reusing a saved report
+
+Scanning large directory trees can take a long time. Save the report once,
+inspect it, then apply actions later without rescanning.
+
+```bash
+# 1. Scan and save the report
+smart_file_duplicate_manager --path /media/data \
+    --min-size 104857600 \
+    --output json --output-file /tmp/dupes.json
+
+# 2. Inspect the plan from the saved report (no rescanning)
+smart_file_duplicate_manager --from-report /tmp/dupes.json
+
+# 3. Execute an action (still dry-run unless --yes is given)
+smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --yes
+```
+
+When `--from-report` is used, each file is validated against its recorded
+size and mtime before any action is applied. If a file changed since the scan,
+it is skipped and reported as an error — nothing is silently modified.
+
+`--path` and `--from-report` are mutually exclusive.
+
 ### JSON output
 
 ```json
@@ -189,8 +217,9 @@ smart_file_duplicate_manager --path ~/Music --output json --output-file report.j
 ## Exit codes
 
 - `0` — success
-- `1` — invalid arguments or path does not exist
+- `1` — invalid arguments, path does not exist, or report cannot be loaded
 
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE).
+
