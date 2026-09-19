@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -18,6 +18,7 @@ const GITHUB: &str = "smartlegionlab";
 const REPO_URL: &str = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs";
 
 const PREFIX_BYTES: u64 = 4096;
+const DEFAULT_SAMPLE_THRESHOLD: u64 = 100 * 1024 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -40,6 +41,12 @@ struct Cli {
 
     #[arg(long = "max-size", value_name = "BYTES", help = "Maximum file size in bytes")]
     max_size: Option<u64>,
+
+    #[arg(long = "sample-chunk", value_name = "BYTES", default_value_t = 0, help = "Sample chunk size for large files (0 = read fully; e.g. 4194304 for 4 MB)")]
+    sample_chunk: u64,
+
+    #[arg(long = "sample-threshold", value_name = "BYTES", default_value_t = DEFAULT_SAMPLE_THRESHOLD, help = "Apply sampling only to files at least this large (bytes)")]
+    sample_threshold: u64,
 
     #[arg(long = "follow-links", help = "Follow symbolic links during scan")]
     follow_links: bool,
@@ -217,6 +224,29 @@ struct JsonReport {
     total_groups: usize,
     total_files: usize,
     total_wasted: u64,
+}
+
+#[derive(Clone, Copy)]
+struct SampleConfig {
+    chunk: u64,
+    threshold: u64,
+}
+
+impl SampleConfig {
+    fn from_cli(cli: &Cli) -> Self {
+        Self {
+            chunk: cli.sample_chunk,
+            threshold: cli.sample_threshold,
+        }
+    }
+
+    fn should_sample(&self, size: u64) -> bool {
+        self.chunk > 0 && size >= self.threshold
+    }
+
+    fn active(&self) -> bool {
+        self.chunk > 0
+    }
 }
 
 fn current_year() -> u64 {
@@ -459,18 +489,53 @@ fn hash_prefix(path: &Path, size: u64) -> Option<blake3::Hash> {
     Some(blake3::hash(&buf))
 }
 
-fn hash_full(path: &Path) -> Option<blake3::Hash> {
-    let mut file = File::open(path).ok()?;
-    let mut hasher = Hasher::new();
+fn hash_range(file: &mut File, offset: u64, len: u64, hasher: &mut Hasher) -> Option<()> {
+    file.seek(SeekFrom::Start(offset)).ok()?;
+    let mut remaining = len;
     let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf).ok()?;
+    while remaining > 0 {
+        let to_read = remaining.min(buf.len() as u64) as usize;
+        let n = file.read(&mut buf[..to_read]).ok()?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
+        remaining -= n as u64;
     }
-    Some(hasher.finalize())
+    Some(())
+}
+
+fn hash_full(path: &Path, size: u64, sample: SampleConfig) -> Option<blake3::Hash> {
+    let mut file = File::open(path).ok()?;
+    let mut hasher = Hasher::new();
+
+    if sample.should_sample(size) {
+        let chunk = sample.chunk.min(size);
+
+        hash_range(&mut file, 0, chunk, &mut hasher)?;
+
+        if size > chunk {
+            let middle_offset = (size - chunk) / 2;
+            hash_range(&mut file, middle_offset, chunk, &mut hasher)?;
+        }
+
+        if size > 2 * chunk {
+            let end_offset = size - chunk;
+            hash_range(&mut file, end_offset, chunk, &mut hasher)?;
+        }
+
+        Some(hasher.finalize())
+    } else {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut buf).ok()?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        Some(hasher.finalize())
+    }
 }
 
 fn phase_hash_prefix(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntry>> {
@@ -500,7 +565,11 @@ fn phase_hash_prefix(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEn
     out
 }
 
-fn phase_hash_full(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntry>> {
+fn phase_hash_full(
+    groups: Vec<Vec<FileEntry>>,
+    sample: SampleConfig,
+    quiet: bool,
+) -> Vec<Vec<FileEntry>> {
     let start = Instant::now();
     let total: usize = groups.iter().map(|g| g.len()).sum();
 
@@ -530,7 +599,7 @@ fn phase_hash_full(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntr
     let results: Vec<(u64, FileEntry, blake3::Hash)> = flat
         .into_par_iter()
         .filter_map(|(size, f)| {
-            let h = hash_full(&f.path);
+            let h = hash_full(&f.path, size, sample);
             if let Some(pb) = pb_ref {
                 pb.inc(1);
             }
@@ -551,20 +620,27 @@ fn phase_hash_full(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntr
 
     let total_out: usize = out.iter().map(|g| g.len()).sum();
     if !quiet {
+        let note = if sample.active() {
+            format!(" (sampling: {} B chunks for files >= {} B)", sample.chunk, sample.threshold)
+        } else {
+            String::new()
+        };
         println!(
-            "[4/5] Full hash:   {} duplicate groups, {} files ({:.2}s)",
+            "[4/5] Full hash:   {} duplicate groups, {} files ({:.2}s){}",
             out.len(),
             total_out,
-            start.elapsed().as_secs_f64()
+            start.elapsed().as_secs_f64(),
+            note
         );
     }
     out
 }
 
-fn files_equal(a: &FileEntry, b: &FileEntry) -> bool {
+fn files_equal(a: &FileEntry, b: &FileEntry, sample: SampleConfig) -> bool {
     if a.size != b.size {
         return false;
     }
+
     let mut fa = match File::open(&a.path) {
         Ok(f) => f,
         Err(_) => return false,
@@ -574,15 +650,67 @@ fn files_equal(a: &FileEntry, b: &FileEntry) -> bool {
         Err(_) => return false,
     };
 
+    if sample.should_sample(a.size) {
+        let chunk = sample.chunk.min(a.size);
+
+        if !compare_range(&mut fa, &mut fb, 0, chunk) {
+            return false;
+        }
+        if a.size > chunk {
+            let mid = (a.size - chunk) / 2;
+            if !compare_range(&mut fa, &mut fb, mid, chunk) {
+                return false;
+            }
+        }
+        if a.size > 2 * chunk {
+            let end = a.size - chunk;
+            if !compare_range(&mut fa, &mut fb, end, chunk) {
+                return false;
+            }
+        }
+        true
+    } else {
+        let mut ba = vec![0u8; 64 * 1024];
+        let mut bb = vec![0u8; 64 * 1024];
+        loop {
+            let na = match fa.read(&mut ba) {
+                Ok(n) => n,
+                Err(_) => return false,
+            };
+            let nb = match fb.read(&mut bb) {
+                Ok(n) => n,
+                Err(_) => return false,
+            };
+            if na != nb {
+                return false;
+            }
+            if na == 0 {
+                return true;
+            }
+            if ba[..na] != bb[..nb] {
+                return false;
+            }
+        }
+    }
+}
+
+fn compare_range(fa: &mut File, fb: &mut File, offset: u64, len: u64) -> bool {
+    if fa.seek(SeekFrom::Start(offset)).is_err() {
+        return false;
+    }
+    if fb.seek(SeekFrom::Start(offset)).is_err() {
+        return false;
+    }
+    let mut remaining = len;
     let mut ba = vec![0u8; 64 * 1024];
     let mut bb = vec![0u8; 64 * 1024];
-
-    loop {
-        let na = match fa.read(&mut ba) {
+    while remaining > 0 {
+        let to_read = remaining.min(ba.len() as u64) as usize;
+        let na = match fa.read(&mut ba[..to_read]) {
             Ok(n) => n,
             Err(_) => return false,
         };
-        let nb = match fb.read(&mut bb) {
+        let nb = match fb.read(&mut bb[..to_read]) {
             Ok(n) => n,
             Err(_) => return false,
         };
@@ -590,15 +718,21 @@ fn files_equal(a: &FileEntry, b: &FileEntry) -> bool {
             return false;
         }
         if na == 0 {
-            return true;
+            break;
         }
         if ba[..na] != bb[..nb] {
             return false;
         }
+        remaining -= na as u64;
     }
+    true
 }
 
-fn phase_confirm(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntry>> {
+fn phase_confirm(
+    groups: Vec<Vec<FileEntry>>,
+    sample: SampleConfig,
+    quiet: bool,
+) -> Vec<Vec<FileEntry>> {
     let start = Instant::now();
 
     let confirmed: Vec<Vec<FileEntry>> = groups
@@ -608,7 +742,7 @@ fn phase_confirm(groups: Vec<Vec<FileEntry>>, quiet: bool) -> Vec<Vec<FileEntry>
             let mut same = vec![reference.clone()];
 
             for other in group.iter().skip(1) {
-                if files_equal(reference, other) {
+                if files_equal(reference, other, sample) {
                     same.push(other.clone());
                 }
             }
@@ -1223,6 +1357,7 @@ fn main() {
     let quiet = cli.output == OutputFormat::Json || cli.output_file.is_some();
     let colors = Colors::new(should_colorize(cli.color) && !quiet);
     let text_output = cli.output == OutputFormat::Text;
+    let sample = SampleConfig::from_cli(&cli);
 
     let mut out: Box<dyn Write> = match &cli.output_file {
         Some(p) => match File::create(p) {
@@ -1283,12 +1418,21 @@ fn main() {
             std::process::exit(1);
         }
 
+        if !quiet && sample.active() {
+            writeln!(
+                out,
+                "Sampling: {} B chunks for files >= {} B",
+                sample.chunk, sample.threshold
+            )
+            .ok();
+        }
+
         let filter = ScanFilter::from_cli(&cli);
         let files = phase_scan(path, &cli, &filter, quiet);
         let by_size = phase_group_by_size(files, quiet);
         let by_prefix = phase_hash_prefix(by_size, quiet);
-        let by_full = phase_hash_full(by_prefix, quiet);
-        let confirmed = phase_confirm(by_full, quiet);
+        let by_full = phase_hash_full(by_prefix, sample, quiet);
+        let confirmed = phase_confirm(by_full, sample, quiet);
         let groups = prepare_groups(&confirmed, cli.keep);
         (groups, Some(path.as_path()), false)
     };
