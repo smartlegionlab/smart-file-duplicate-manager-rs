@@ -1458,7 +1458,9 @@ fn write_footer(out: &mut dyn Write) {
 fn main() {
     let cli = Cli::parse();
 
-    let quiet = cli.output == OutputFormat::Json || cli.output_file.is_some();
+    let json_to_stdout = cli.output == OutputFormat::Json && cli.output_file.is_none();
+    let writing_to_file = cli.output_file.is_some();
+    let quiet = json_to_stdout;
     let colors = Colors::new(should_colorize(cli.color) && !quiet);
     let text_output = cli.output == OutputFormat::Text;
     let shell_output = cli.output == OutputFormat::Shell;
@@ -1490,7 +1492,7 @@ fn main() {
         None => Box::new(std::io::stdout()),
     };
 
-    if !quiet && !shell_output {
+    if !quiet && !shell_output && !writing_to_file {
         writeln!(out, "{} v{}", APP_NAME, VERSION).ok();
         writeln!(out).ok();
     }
@@ -1517,7 +1519,7 @@ fn main() {
                 std::process::exit(1);
             }
         };
-        if !quiet && !shell_output {
+        if !quiet && !shell_output && !writing_to_file {
             writeln!(
                 out,
                 "Loaded {} groups from report: {}",
@@ -1525,6 +1527,12 @@ fn main() {
                 report_path.display()
             )
             .ok();
+        } else if !quiet && !shell_output && writing_to_file {
+            eprintln!(
+                "Loaded {} groups from report: {}",
+                groups.len(),
+                report_path.display()
+            );
         }
         (groups, None, true)
     } else {
@@ -1539,12 +1547,10 @@ fn main() {
         }
 
         if !quiet && !shell_output && sample.active() {
-            writeln!(
-                out,
+            eprintln!(
                 "Sampling: {} B chunks for files >= {} B",
                 sample.chunk, sample.threshold
-            )
-            .ok();
+            );
         }
 
         let filter = ScanFilter::from_cli(&cli);
@@ -1596,7 +1602,7 @@ fn main() {
     }
 
     if cli.action == Action::Report {
-        if text_output {
+        if text_output && !writing_to_file {
             write_footer(&mut out);
         }
         out.flush().ok();
@@ -1676,7 +1682,7 @@ fn main() {
         }
     }
 
-    if !quiet && text_output {
+    if !quiet && text_output && !writing_to_file {
         write_footer(&mut out);
     }
 
