@@ -284,13 +284,6 @@ impl Colors {
     }
 }
 
-fn print_footer() {
-    let year = current_year();
-    println!();
-    println!("Copyright (c) {} {} <{}>", year, AUTHOR, GITHUB);
-    println!("Repo: {}", REPO_URL);
-}
-
 fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
     let mut size = bytes as f64;
@@ -706,6 +699,7 @@ fn prepare_groups(groups: &[Vec<FileEntry>], strategy: KeepStrategy) -> Vec<Prep
 }
 
 fn print_report(
+    out: &mut dyn Write,
     groups: &[PreparedGroup],
     strategy: KeepStrategy,
     limit: Option<usize>,
@@ -713,15 +707,17 @@ fn print_report(
     colors: &Colors,
     quiet_footer: bool,
 ) {
-    println!();
-    println!(
+    writeln!(out).ok();
+    writeln!(
+        out,
         "{}",
         colors.bold(&format!("=== Duplicate report (keep: {:?}) ===", strategy))
-    );
-    println!();
+    )
+    .ok();
+    writeln!(out).ok();
 
     if groups.is_empty() {
-        println!("No duplicates found.");
+        writeln!(out, "No duplicates found.").ok();
         return;
     }
 
@@ -734,7 +730,8 @@ fn print_report(
     };
 
     for (i, group) in groups.iter().take(display_count).enumerate() {
-        println!(
+        writeln!(
+            out,
             "{}",
             colors.bold(&format!(
                 "Group #{} — {} files, {} each, {} wasted",
@@ -743,46 +740,53 @@ fn print_report(
                 format_size(group.size),
                 format_size(group.wasted)
             ))
-        );
-        println!(
+        )
+        .ok();
+        writeln!(
+            out,
             "  {} {}",
             colors.green("[KEEP]"),
             display_path(&group.keep.path)
-        );
+        )
+        .ok();
         for f in &group.delete {
-            println!("  {} {}", colors.red("[DEL] "), display_path(&f.path));
+            writeln!(out, "  {} {}", colors.red("[DEL] "), display_path(&f.path)).ok();
         }
-        println!();
+        writeln!(out).ok();
     }
 
     if display_count < groups.len() {
-        println!(
+        writeln!(
+            out,
             "{}",
             colors.yellow(&format!(
                 "... {} more groups not shown (use --limit to change)",
                 groups.len() - display_count
             ))
-        );
-        println!();
+        )
+        .ok();
+        writeln!(out).ok();
     }
 
-    println!(
+    writeln!(
+        out,
         "Total: {} groups, {} files, {} wasted",
         groups.len(),
         total_files,
         format_size(wasted),
-    );
+    )
+    .ok();
 
     if group_by_dir {
-        print_dir_groups(groups, colors);
+        print_dir_groups(out, groups, colors);
     }
 
     if quiet_footer {
-        println!("Nothing was deleted. This is a report only.");
+        writeln!(out, "Nothing was deleted. This is a report only.").ok();
     }
 }
 
-fn print_dir_groups(groups: &[PreparedGroup], colors: &Colors) {
+fn print_dir_groups(out: &mut dyn Write, groups: &[PreparedGroup], colors: &Colors) {
     let mut dir_counts: HashMap<PathBuf, u64> = HashMap::new();
 
     for group in groups {
@@ -802,22 +806,27 @@ fn print_dir_groups(groups: &[PreparedGroup], colors: &Colors) {
         return;
     }
 
-    println!();
-    println!(
+    writeln!(out).ok();
+    writeln!(
+        out,
         "{}",
         colors.bold("=== Directories with most duplicates ===")
-    );
-    println!();
+    )
+    .ok();
+    writeln!(out).ok();
     for (dir, count) in significant.iter().take(20) {
-        println!(
+        writeln!(
+            out,
             "  {} {} duplicates",
             colors.cyan(&count.to_string()),
             display_path(dir)
-        );
+        )
+        .ok();
     }
 }
 
 fn print_json_report(
+    out: &mut dyn Write,
     groups: &[PreparedGroup],
     strategy: KeepStrategy,
     action: Action,
@@ -868,7 +877,7 @@ fn print_json_report(
     };
 
     let json = serde_json::to_string_pretty(&report).unwrap();
-    println!("{}", json);
+    writeln!(out, "{}", json).ok();
 }
 
 fn action_bar(prefix: &str, total: u64) -> ProgressBar {
@@ -1120,13 +1129,20 @@ fn perform_actions(
     summary
 }
 
+fn write_footer(out: &mut dyn Write) {
+    let year = current_year();
+    writeln!(out).ok();
+    writeln!(out, "Copyright (c) {} {} <{}>", year, AUTHOR, GITHUB).ok();
+    writeln!(out, "Repo: {}", REPO_URL).ok();
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let quiet = cli.output == OutputFormat::Json || cli.output_file.is_some();
     let colors = Colors::new(should_colorize(cli.color) && !quiet);
 
-    let out: Box<dyn Write> = match &cli.output_file {
+    let mut out: Box<dyn Write> = match &cli.output_file {
         Some(p) => match File::create(p) {
             Ok(f) => Box::new(f),
             Err(e) => {
@@ -1136,7 +1152,6 @@ fn main() {
         },
         None => Box::new(std::io::stdout()),
     };
-    let mut out = out;
 
     if !quiet {
         writeln!(out, "{} v{}", APP_NAME, VERSION).ok();
@@ -1169,10 +1184,11 @@ fn main() {
     let prepared = prepare_groups(&confirmed, cli.keep);
 
     if cli.output == OutputFormat::Json {
-        print_json_report(&prepared, cli.keep, cli.action, path, cli.limit);
+        print_json_report(&mut out, &prepared, cli.keep, cli.action, path, cli.limit);
     } else {
         let quiet_footer = cli.action == Action::Report;
         print_report(
+            &mut out,
             &prepared,
             cli.keep,
             cli.limit,
@@ -1183,7 +1199,8 @@ fn main() {
     }
 
     if cli.action == Action::Report {
-        print_footer();
+        write_footer(&mut out);
+        out.flush().ok();
         return;
     }
 
@@ -1200,21 +1217,23 @@ fn main() {
     let wasted: u64 = actions.iter().map(|(v, _)| v.size).sum();
 
     if !quiet {
-        println!();
-        println!(
+        writeln!(out).ok();
+        writeln!(
+            out,
             "{}",
             colors.bold(&format!("=== Action plan ({:?}) ===", cli.action))
-        );
-        println!();
-        println!("Files to process: {}", actions.len());
-        println!("Space to free:    {}", format_size(wasted));
+        )
+        .ok();
+        writeln!(out).ok();
+        writeln!(out, "Files to process: {}", actions.len()).ok();
+        writeln!(out, "Space to free:    {}", format_size(wasted)).ok();
     }
 
     let dry_run = cli.dry_run || !cli.yes;
 
     if !cli.yes && !cli.dry_run && !quiet {
-        println!();
-        println!("This is a dry run. To execute, add --yes");
+        writeln!(out).ok();
+        writeln!(out, "This is a dry run. To execute, add --yes").ok();
     }
 
     let summary = perform_actions(
@@ -1226,36 +1245,37 @@ fn main() {
     );
 
     if !quiet {
-        println!();
+        writeln!(out).ok();
         if dry_run {
-            println!("[DRY RUN] No changes were made.");
-            println!("Processed (simulated): {}", summary.processed);
-            println!(
+            writeln!(out, "[DRY RUN] No changes were made.").ok();
+            writeln!(out, "Processed (simulated): {}", summary.processed).ok();
+            writeln!(
+                out,
                 "Space to free:         {}",
                 format_size(summary.bytes_freed)
-            );
+            )
+            .ok();
         } else {
-            println!("Processed: {}", summary.processed);
-            println!("Failed:    {}", summary.failed);
-            println!("Freed:     {}", format_size(summary.bytes_freed));
+            writeln!(out, "Processed: {}", summary.processed).ok();
+            writeln!(out, "Failed:    {}", summary.failed).ok();
+            writeln!(out, "Freed:     {}", format_size(summary.bytes_freed)).ok();
         }
 
         if !summary.errors.is_empty() {
-            println!();
-            println!("Errors:");
+            writeln!(out).ok();
+            writeln!(out, "Errors:").ok();
             for e in summary.errors.iter().take(20) {
-                println!("  {}", e);
+                writeln!(out, "  {}", e).ok();
             }
             if summary.errors.len() > 20 {
-                println!("  ... and {} more", summary.errors.len() - 20);
+                writeln!(out, "  ... and {} more", summary.errors.len() - 20).ok();
             }
         }
     }
 
     if !quiet {
-        let year = current_year();
-        println!();
-        println!("Copyright (c) {} {} <{}>", year, AUTHOR, GITHUB);
-        println!("Repo: {}", REPO_URL);
+        write_footer(&mut out);
     }
+
+    out.flush().ok();
 }
