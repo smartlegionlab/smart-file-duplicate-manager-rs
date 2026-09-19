@@ -38,6 +38,7 @@ that avoids reading entire files unless necessary.
 - JSON output for scripting and integration
 - Reusable JSON reports: apply actions later without rescanning
 - Size and mtime validation when applying actions from a saved report
+- Shell script output: generate a reviewable bash script instead of executing
 - Optional sampling mode for large files (opt-in, off by default)
 - Filters: extension, path exclusion, size range, hidden files
 - Colored output (ANSI, no external color crates)
@@ -84,28 +85,28 @@ smart_file_duplicate_manager -p ~/Pictures
 
 ### Options
 
-| Option                       | Description                                                           | Default  |
-|------------------------------|-----------------------------------------------------------------------|----------|
-| `-p, --path <PATH>`          | Directory to scan (required unless `--from-report` is used)           | —        |
-| `--from-report <FILE>`       | Load duplicate groups from a JSON report instead of scanning          | —        |
-| `--min-size <BYTES>`         | Minimum file size                                                     | `1`      |
-| `--max-size <BYTES>`         | Maximum file size                                                     | —        |
-| `--sample-chunk <BYTES>`     | Read only 3 chunks (start/middle/end) of large files (0 = read fully) | `0`      |
-| `--sample-threshold <BYTES>` | Apply sampling only to files at least this large                      | `100 MB` |
-| `--ext <LIST>`               | Only these extensions (comma-separated)                               | —        |
-| `--exclude <LIST>`           | Skip paths containing these substrings                                | —        |
-| `--hidden`                   | Include hidden files                                                  | `false`  |
-| `--follow-links`             | Follow symbolic links                                                 | `false`  |
-| `--keep <STRATEGY>`          | Which file to keep: `first`, `newest`, `oldest`, `shortest`           | `first`  |
-| `--action <ACTION>`          | `report`, `trash`, `move`, `delete`, `hardlink`                       | `report` |
-| `--action-dir <DIR>`         | Destination for `move` action                                         | —        |
-| `--yes`                      | Execute destructive actions (without it: dry-run)                     | `false`  |
-| `--dry-run`                  | Force dry-run even with `--yes`                                       | `false`  |
-| `--limit <N>`                | Show only top N groups in report                                      | —        |
-| `--group-by-dir`             | Show directories with most duplicates                                 | `false`  |
-| `--output <FORMAT>`          | `text` or `json`                                                      | `text`   |
-| `--output-file <PATH>`       | Write output to file                                                  | —        |
-| `--color <WHEN>`             | `auto`, `always`, `never`                                             | `auto`   |
+| Option                       | Description                                                                            | Default  |
+|------------------------------|----------------------------------------------------------------------------------------|----------|
+| `-p, --path <PATH>`          | Directory to scan (required unless `--from-report` is used)                            | —        |
+| `--from-report <FILE>`       | Load duplicate groups from a JSON report instead of scanning                           | —        |
+| `--min-size <BYTES>`         | Minimum file size                                                                      | `1`      |
+| `--max-size <BYTES>`         | Maximum file size                                                                      | —        |
+| `--sample-chunk <BYTES>`     | Read only 3 chunks (start/middle/end) of large files (0 = read fully)                  | `0`      |
+| `--sample-threshold <BYTES>` | Apply sampling only to files at least this large                                       | `100 MB` |
+| `--ext <LIST>`               | Only these extensions (comma-separated)                                                | —        |
+| `--exclude <LIST>`           | Skip paths containing these substrings                                                 | —        |
+| `--hidden`                   | Include hidden files                                                                   | `false`  |
+| `--follow-links`             | Follow symbolic links                                                                  | `false`  |
+| `--keep <STRATEGY>`          | Which file to keep: `first`, `newest`, `oldest`, `shortest`                            | `first`  |
+| `--action <ACTION>`          | `report`, `trash`, `move`, `delete`, `hardlink`                                        | `report` |
+| `--action-dir <DIR>`         | Destination for `move` action                                                          | —        |
+| `--yes`                      | Execute destructive actions (without it: dry-run)                                      | `false`  |
+| `--dry-run`                  | Force dry-run even with `--yes`                                                        | `false`  |
+| `--limit <N>`                | Show only top N groups in report                                                       | —        |
+| `--group-by-dir`             | Show directories with most duplicates                                                  | `false`  |
+| `--output <FORMAT>`          | `text`, `json`, or `shell` (shell requires `--action delete\|move\|hardlink`)          | `text`   |
+| `--output-file <PATH>`       | Write output to file                                                                   | —        |
+| `--color <WHEN>`             | `auto`, `always`, `never`                                                              | `auto`   |
 
 ### Actions
 
@@ -220,6 +221,60 @@ it is skipped and reported as an error — nothing is silently modified.
 
 `--path` and `--from-report` are mutually exclusive.
 
+### Shell script output
+
+Instead of executing a destructive action directly, the tool can produce a
+bash script that performs the action. Review it, then run it manually.
+
+```bash
+# Generate a delete script (does NOT execute it)
+smart_file_duplicate_manager --path /media/data \
+    --action delete --output shell --output-file /tmp/cleanup.sh
+
+less /tmp/cleanup.sh     # inspect
+bash -n /tmp/cleanup.sh  # syntax check
+bash /tmp/cleanup.sh     # execute when ready
+```
+
+Supported actions:
+
+| Action     | Generated command                                              |
+|------------|----------------------------------------------------------------|
+| `delete`   | `rm -- <path>`                                                 |
+| `move`     | `mv -- <src> <--action-dir>/<name>`                            |
+| `hardlink` | `ln -f -- <keep> <tmp> && rm -- <del> && mv -- <tmp> <del>`    |
+
+**Not supported:**
+
+- `--action report` — nothing to write (use `--output text`).
+- `--action trash` — the XDG trash requires `.trashinfo` metadata; use
+  `--action trash` directly instead.
+
+The script is never executed by the tool. It is plain text you can inspect
+and modify.
+
+Example output for `--action delete`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Generated by Smart File Duplicate Manager
+# Keep strategy: First
+# Action: Delete
+# Root: /media/data/
+# Groups: 14
+# Files to process: 41
+# Space to free: 20.50 GB
+#
+# Review carefully before running.
+
+# Group #1: 500.00 MB each, 500.00 MB wasted
+# KEEP: /media/data/a.mp4
+rm -- /media/data/b.mp4
+...
+```
+
 ### JSON output
 
 ```json
@@ -268,6 +323,16 @@ cargo build --release
 Binary: `target/release/smart_file_duplicate_manager`.
 
 Warnings are not expected. If any appear, investigate before committing.
+
+If a change does not appear in the binary, force a rebuild:
+
+```bash
+touch src/main.rs
+cargo build --release
+
+# Or, if still stale:
+cargo clean && cargo build --release
+```
 
 ### Sandbox — basic (small files)
 
@@ -391,6 +456,40 @@ ls -li /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --action delete --yes
 ```
 
+### Test — shell output
+
+```bash
+# Argument errors
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --output shell
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --output shell --action trash
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --output shell --action move
+
+# Generate a delete script and inspect it
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output shell --action delete
+
+# Write to file and syntax-check
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output shell --action delete --output-file /tmp/dupes_delete.sh
+bash -n /tmp/dupes_delete.sh && echo "syntax OK"
+
+# Execute the generated script (on a sandbox copy)
+cp -r /tmp/dupes_test /tmp/dupes_test_copy
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test_copy/ \
+    --output shell --action delete --output-file /tmp/dupes_delete.sh
+bash /tmp/dupes_delete.sh
+ls -la /tmp/dupes_test_copy/a /tmp/dupes_test_copy/b
+
+# Move script
+mkdir -p /tmp/dupes_out
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output shell --action move --action-dir /tmp/dupes_out
+
+# Hardlink script
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
+    --output shell --action hardlink
+```
+
 ### Test — reuse saved report
 
 ```bash
@@ -458,10 +557,13 @@ Before each commit, ensure:
 2. Default scan (`--path` only) — same output as before.
 3. `--output json` — valid JSON, no trailing text.
 4. `--output json --output-file` — valid JSON in file.
-5. `--action trash` without `--yes` — dry-run, files untouched.
-6. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
-7. `--from-report` — loads saved report, validates size and mtime.
-8. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
+5. `--output shell` — generates a script; `bash -n` passes.
+6. `--output shell` without `--action delete|move|hardlink` — error.
+7. `--output shell --action trash` — error.
+8. `--action trash` without `--yes` — dry-run, files untouched.
+9. `--action trash --yes` on sandbox — files moved to trash, kept file intact.
+10. `--from-report` — loads saved report, validates size and mtime.
+11. Sampling flag (`--sample-chunk > 0`) — off by default, opt-in only.
 
 ## License
 
