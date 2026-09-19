@@ -1,9 +1,9 @@
 [package]
 name = "smart_file_duplicate_manager"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Alexander Suvorov <smartlegionlab>"]
-description = "Fast and efficient duplicate file finder written in Rust"
+description = "Safe and fast duplicate file manager: multi-stage detection, dry-run, XDG trash, interactive review, reusable reports"
 repository = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
 license = "BSD-3-Clause"
 

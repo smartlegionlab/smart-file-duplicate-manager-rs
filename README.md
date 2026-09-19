@@ -1,9 +1,10 @@
-# Smart File Duplicate Manager (Rust)
+# Smart File Duplicate Manager
 
-Fast and efficient duplicate file finder written in Rust.
+**A safe, fast, and controllable duplicate file manager for the command line.**
 
-Finds byte-identical files in a directory tree using a multi-stage algorithm
-that avoids reading entire files unless necessary.
+Not just a duplicate finder. It is a complete workflow for locating, reviewing,
+and cleaning duplicate files — with byte-level accuracy, reversible actions,
+multi-stage detection, and full user control at every step.
 
 ---
 
@@ -25,30 +26,82 @@ that avoids reading entire files unless necessary.
 
 ---
 
+## Why this tool
+
+Most duplicate finders give you a list and expect you to figure out the rest.
+This one is built around **control** and **safety**:
+
+- **Nothing is deleted by default.** Every destructive action is a dry-run
+  unless you pass `--yes` or `--interactive`.
+- **Byte-level accuracy.** Duplicates are confirmed by a byte-by-byte
+  comparison, not just a hash.
+- **Reversible by default.** The `trash` action moves files to the XDG trash
+  (`~/.local/share/Trash`) — you can restore them at any time.
+- **Per-file confirmation.** `--interactive` prompts before each deletion.
+- **Reusable reports.** Scan once, inspect, act later — without rescanning.
+- **Reviewable scripts.** `--output shell` produces a bash script you can read
+  and edit before running.
+- **Fast on large files.** An optional sampling mode reads only 3 chunks per
+  file (start, middle, end) for 10–100× speedups on multi-gigabyte files.
 
 ## Features
 
-- Recursive directory scanning
-- Multi-stage duplicate detection: size → prefix hash → full hash → byte-by-byte confirmation
-- BLAKE3 hashing with parallel processing (rayon)
-- Four strategies for choosing which file to keep
-- Five actions: report, trash, move, delete, hardlink
-- Interactive mode: confirm each file before action
-- Dry-run by default for destructive actions
-- XDG-compliant trash (reversible)
-- JSON output for scripting and integration
-- Reusable JSON reports: apply actions later without rescanning
-- Size and mtime validation when applying actions from a saved report
-- Shell script output: generate a reviewable bash script instead of executing
-- Optional sampling mode for large files (opt-in, off by default)
-- Filters: extension, path exclusion, size range, hidden files
-- Colored output (ANSI, no external color crates)
-- Progress bars for long operations
-- Unit and integration tests (48 tests)
+### Detection
+
+- Multi-stage pipeline: size → prefix hash (4 KB) → full BLAKE3 hash → byte-by-byte confirmation
+- Reads full file contents only for real candidates, not for every file
+- Parallel hashing via rayon
+- Optional sampling mode for very large files (opt-in, off by default)
+- Symlink-aware (`--follow-links`)
+
+### Control
+
+- Dry-run by default for every destructive action
+- Reversible `trash` action (XDG-compliant, restore with file manager)
+- Interactive mode: confirm each file individually
+- Validation of size and mtime before each action (in `--from-report` mode)
+- Never touches anything without an explicit flag
+
+### Actions
+
+- `report` — show groups, delete nothing (default)
+- `trash` — move duplicates to `~/.local/share/Trash` (reversible)
+- `move` — move duplicates to a chosen folder
+- `delete` — permanently remove duplicates
+- `hardlink` — replace duplicates with hard links to the kept file
+
+### Strategies
+
+- Keep `first` (alphabetical), `newest`, `oldest`, or `shortest` path
+
+### Filters
+
+- Minimum and maximum file size
+- Extension allow-list
+- Path exclusion (substring match, prunes subtrees)
+- Hidden files (excluded by default)
+
+### Output and integration
+
+- Plain text with ANSI colors (auto-detected, no extra dependencies)
+- JSON output for scripts and pipelines
+- Shell script output for manual review
+- Reusable reports: `--from-report <FILE>` skips scanning
+- Progress bars for long-running phases
+- Quiet mode when piping JSON
+
+### Quality
+
+- 55 unit and integration tests
+- No `unsafe`
+- No warnings on `cargo build --release`
+- Tests run in isolated temporary directories
 
 ## Algorithm
 
-Duplicate detection runs in five phases:
+Duplicate detection runs in five phases. Each phase filters the candidate set
+further, so that expensive operations run only on files that survived all
+previous checks.
 
 1. **Scan** — walk the directory tree, collect files (path, size, mtime)
 2. **Group by size** — files of different sizes cannot be duplicates
@@ -56,8 +109,9 @@ Duplicate detection runs in five phases:
 4. **Full hash** — BLAKE3 over full content, parallelized with rayon
 5. **Confirm** — byte-by-byte comparison to rule out hash collisions
 
-This way, full file contents are read only for files that pass all previous
-filters — typically a small fraction of the total.
+With the optional `--sample-chunk` flag, phases 4 and 5 read only three
+chunks per file (start, middle, end) instead of the whole file. This is a
+probabilistic check — see the sampling section below.
 
 ## Installation
 
@@ -868,6 +922,8 @@ Before each commit, ensure:
 15. `--interactive` + `--output shell` — error.
 
 ## License
+
+Author: [Alexander Suvorov](https://smartlegionlab.github.io)
 
 BSD 3-Clause License. See [LICENSE](LICENSE).
 

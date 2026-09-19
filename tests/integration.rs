@@ -37,11 +37,21 @@ fn test_help_exit_zero() {
 
 #[test]
 fn test_version() {
-    bin()
+    let output = bin()
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("1.0.0"));
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let expected = env!("CARGO_PKG_VERSION");
+    assert!(
+        text.contains(expected),
+        "version output {:?} should contain {}",
+        text,
+        expected
+    );
 }
 
 #[test]
@@ -304,4 +314,199 @@ fn test_interactive_with_shell_output_rejected() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("--interactive cannot be combined with --output shell"));
+}
+
+#[test]
+fn test_report_keeps_all_files() {
+    let dir = make_sandbox();
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+
+    assert!(a_file.exists(), "precondition: a/file1.txt exists");
+    assert!(b_file.exists(), "precondition: b/file1.txt exists");
+
+    bin()
+        .args(["--path", &sandbox_path(&dir)])
+        .assert()
+        .success();
+
+    assert!(a_file.exists(), "report must not delete the kept file");
+    assert!(b_file.exists(), "report must not delete anything");
+}
+
+#[test]
+fn test_dry_run_keeps_all_files() {
+    let dir = make_sandbox();
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--action", "trash"])
+        .assert()
+        .success();
+
+    assert!(a_file.exists(), "dry-run must not delete the kept file");
+    assert!(b_file.exists(), "dry-run must not delete anything");
+}
+
+#[test]
+fn test_delete_keeps_keep_removes_del() {
+    let dir = make_sandbox();
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--action", "delete", "--yes"])
+        .assert()
+        .success();
+
+    assert!(
+        a_file.exists(),
+        "KEEP file must survive --action delete --yes"
+    );
+    assert!(
+        !b_file.exists(),
+        "DEL file must be removed by --action delete --yes"
+    );
+}
+
+#[test]
+fn test_move_keeps_keep_moves_del() {
+    let dir = make_sandbox();
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+    let out_dir = dir.path().join("moved");
+
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--action",
+            "move",
+            "--action-dir",
+            out_dir.to_str().unwrap(),
+            "--yes",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        a_file.exists(),
+        "KEEP file must survive --action move --yes"
+    );
+    assert!(
+        !b_file.exists(),
+        "DEL file must be gone from its original location"
+    );
+    assert!(
+        out_dir.join("file1.txt").exists(),
+        "DEL file must appear in the action-dir"
+    );
+}
+
+#[test]
+fn test_untouched_file_survives_action() {
+    let dir = make_sandbox();
+    let a_unique = dir.path().join("a/unique.txt");
+    let b_unique = dir.path().join("b/untouched.txt");
+
+    fs::write(&b_unique, b"i am not a duplicate").unwrap();
+
+    assert!(a_unique.exists());
+    assert!(b_unique.exists());
+
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--action", "delete", "--yes"])
+        .assert()
+        .success();
+
+    assert!(
+        a_unique.exists(),
+        "file with no duplicates must survive"
+    );
+    assert!(
+        b_unique.exists(),
+        "file not in the duplicate list must survive"
+    );
+}
+
+#[test]
+fn test_from_report_trash_keeps_keep() {
+    let dir = make_sandbox();
+    let json_path = dir.path().join("report.json");
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--output",
+            "json",
+            "--output-file",
+            json_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    bin()
+        .args([
+            "--from-report",
+            json_path.to_str().unwrap(),
+            "--action",
+            "delete",
+            "--yes",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        a_file.exists(),
+        "KEEP file must survive --from-report action"
+    );
+    assert!(
+        !b_file.exists(),
+        "DEL file must be removed by --from-report action"
+    );
+}
+
+#[test]
+fn test_from_report_validates_changed_file_and_skips() {
+    let dir = make_sandbox();
+    let json_path = dir.path().join("report.json");
+    let a_file = dir.path().join("a/file1.txt");
+    let b_file = dir.path().join("b/file1.txt");
+
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--output",
+            "json",
+            "--output-file",
+            json_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Modify the file that was going to be deleted.
+    fs::write(&b_file, b"MODIFIED CONTENT").unwrap();
+
+    bin()
+        .args([
+            "--from-report",
+            json_path.to_str().unwrap(),
+            "--action",
+            "delete",
+            "--yes",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Failed:"));
+
+    assert!(a_file.exists(), "KEEP file must survive");
+    assert!(
+        b_file.exists(),
+        "changed DEL file must survive validation rejection"
+    );
 }
