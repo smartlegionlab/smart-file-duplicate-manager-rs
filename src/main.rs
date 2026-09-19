@@ -2,7 +2,7 @@ use blake3::Hasher;
 use clap::{Parser, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
@@ -29,8 +29,11 @@ const PREFIX_BYTES: u64 = 4096;
     after_help = "Repository: https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
 )]
 struct Cli {
-    #[arg(short = 'p', long = "path", value_name = "PATH", help = "Directory to scan (required)")]
-    path: PathBuf,
+    #[arg(short = 'p', long = "path", value_name = "PATH", help = "Directory to scan (required unless --from-report is used)")]
+    path: Option<PathBuf>,
+
+    #[arg(long = "from-report", value_name = "FILE", help = "Load duplicate groups from a JSON report instead of scanning")]
+    from_report: Option<PathBuf>,
 
     #[arg(long = "min-size", value_name = "BYTES", default_value_t = 1, help = "Minimum file size in bytes")]
     min_size: u64,
@@ -189,14 +192,14 @@ impl ScanFilter {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonFile {
     path: String,
     size: u64,
     mtime: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonGroup {
     index: usize,
     size: u64,
@@ -205,7 +208,7 @@ struct JsonGroup {
     delete: Vec<JsonFile>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct JsonReport {
     path: String,
     keep_strategy: String,
@@ -705,6 +708,63 @@ fn prepare_groups(groups: &[Vec<FileEntry>], strategy: KeepStrategy) -> Vec<Prep
     prepared
 }
 
+fn load_groups_from_json(path: &Path) -> Result<Vec<PreparedGroup>, String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let report: JsonReport =
+        serde_json::from_str(&content).map_err(|e| format!("parse {}: {}", path.display(), e))?;
+
+    let mut groups: Vec<PreparedGroup> = report
+        .groups
+        .into_iter()
+        .map(|g| PreparedGroup {
+            size: g.size,
+            wasted: g.wasted,
+            keep: FileEntry {
+                path: PathBuf::from(g.keep.path),
+                size: g.keep.size,
+                mtime: g.keep.mtime,
+            },
+            delete: g
+                .delete
+                .into_iter()
+                .map(|f| FileEntry {
+                    path: PathBuf::from(f.path),
+                    size: f.size,
+                    mtime: f.mtime,
+                })
+                .collect(),
+        })
+        .collect();
+
+    groups.sort_by(|a, b| b.wasted.cmp(&a.wasted));
+    Ok(groups)
+}
+
+fn validate_entry(entry: &FileEntry) -> Result<(), String> {
+    let meta = fs::metadata(&entry.path).map_err(|e| format!("not accessible: {}", e))?;
+    if meta.len() != entry.size {
+        return Err(format!(
+            "size changed: expected {}, got {}",
+            entry.size,
+            meta.len()
+        ));
+    }
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if mtime != entry.mtime {
+        return Err(format!(
+            "mtime changed: expected {}, got {}",
+            entry.mtime, mtime
+        ));
+    }
+    Ok(())
+}
+
 fn print_report(
     out: &mut dyn Write,
     groups: &[PreparedGroup],
@@ -837,7 +897,7 @@ fn print_json_report(
     groups: &[PreparedGroup],
     strategy: KeepStrategy,
     action: Action,
-    root: &Path,
+    root: Option<&Path>,
     limit: Option<usize>,
 ) {
     let display_count = match limit {
@@ -874,7 +934,7 @@ fn print_json_report(
     let total_wasted: u64 = groups.iter().map(|g| g.wasted).sum();
 
     let report = JsonReport {
-        path: root.display().to_string(),
+        path: root.map(|p| p.display().to_string()).unwrap_or_default(),
         keep_strategy: format!("{:?}", strategy),
         action: format!("{:?}", action),
         groups: json_groups,
@@ -1067,6 +1127,7 @@ fn perform_actions(
     action_dir: Option<&Path>,
     dry_run: bool,
     quiet: bool,
+    validate: bool,
 ) -> ActionSummary {
     let mut summary = ActionSummary::default();
 
@@ -1102,6 +1163,19 @@ fn perform_actions(
     };
 
     for (victim, keeper) in actions {
+        if validate {
+            if let Err(e) = validate_entry(victim) {
+                summary.failed += 1;
+                summary
+                    .errors
+                    .push(format!("{}: {}", display_path(&victim.path), e));
+                if let Some(ref pb) = pb {
+                    pb.inc(1);
+                }
+                continue;
+            }
+        }
+
         let result = match action {
             Action::Report => Ok(0),
             Action::Trash => do_trash(&victim.path, &keeper.path),
@@ -1148,6 +1222,7 @@ fn main() {
 
     let quiet = cli.output == OutputFormat::Json || cli.output_file.is_some();
     let colors = Colors::new(should_colorize(cli.color) && !quiet);
+    let text_output = cli.output == OutputFormat::Text;
 
     let mut out: Box<dyn Write> = match &cli.output_file {
         Some(p) => match File::create(p) {
@@ -1165,13 +1240,12 @@ fn main() {
         writeln!(out).ok();
     }
 
-    let path = &cli.path;
-    if !path.exists() {
-        eprintln!("Error: path does not exist: {}", path.display());
+    if cli.path.is_none() && cli.from_report.is_none() {
+        eprintln!("Error: --path or --from-report is required");
         std::process::exit(1);
     }
-    if !path.is_dir() {
-        eprintln!("Error: path is not a directory: {}", path.display());
+    if cli.path.is_some() && cli.from_report.is_some() {
+        eprintln!("Error: --path and --from-report cannot be used together");
         std::process::exit(1);
     }
 
@@ -1180,18 +1254,54 @@ fn main() {
         std::process::exit(1);
     }
 
-    let filter = ScanFilter::from_cli(&cli);
+    let (prepared, root_for_report, use_validation) = if let Some(ref report_path) = cli.from_report {
+        let groups = match load_groups_from_json(report_path) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("Error loading report: {}", e);
+                std::process::exit(1);
+            }
+        };
+        if !quiet {
+            writeln!(
+                out,
+                "Loaded {} groups from report: {}",
+                groups.len(),
+                report_path.display()
+            )
+            .ok();
+        }
+        (groups, None, true)
+    } else {
+        let path = cli.path.as_ref().unwrap();
+        if !path.exists() {
+            eprintln!("Error: path does not exist: {}", path.display());
+            std::process::exit(1);
+        }
+        if !path.is_dir() {
+            eprintln!("Error: path is not a directory: {}", path.display());
+            std::process::exit(1);
+        }
 
-    let files = phase_scan(path, &cli, &filter, quiet);
-    let by_size = phase_group_by_size(files, quiet);
-    let by_prefix = phase_hash_prefix(by_size, quiet);
-    let by_full = phase_hash_full(by_prefix, quiet);
-    let confirmed = phase_confirm(by_full, quiet);
-
-    let prepared = prepare_groups(&confirmed, cli.keep);
+        let filter = ScanFilter::from_cli(&cli);
+        let files = phase_scan(path, &cli, &filter, quiet);
+        let by_size = phase_group_by_size(files, quiet);
+        let by_prefix = phase_hash_prefix(by_size, quiet);
+        let by_full = phase_hash_full(by_prefix, quiet);
+        let confirmed = phase_confirm(by_full, quiet);
+        let groups = prepare_groups(&confirmed, cli.keep);
+        (groups, Some(path.as_path()), false)
+    };
 
     if cli.output == OutputFormat::Json {
-        print_json_report(&mut out, &prepared, cli.keep, cli.action, path, cli.limit);
+        print_json_report(
+            &mut out,
+            &prepared,
+            cli.keep,
+            cli.action,
+            root_for_report,
+            cli.limit,
+        );
     } else {
         let quiet_footer = cli.action == Action::Report;
         print_report(
@@ -1206,7 +1316,9 @@ fn main() {
     }
 
     if cli.action == Action::Report {
-        write_footer(&mut out);
+        if text_output {
+            write_footer(&mut out);
+        }
         out.flush().ok();
         return;
     }
@@ -1234,6 +1346,9 @@ fn main() {
         writeln!(out).ok();
         writeln!(out, "Files to process: {}", actions.len()).ok();
         writeln!(out, "Space to free:    {}", format_size(wasted)).ok();
+        if use_validation {
+            writeln!(out, "Validation:       enabled (checking size and mtime)").ok();
+        }
     }
 
     let dry_run = cli.dry_run || !cli.yes;
@@ -1249,6 +1364,7 @@ fn main() {
         cli.action_dir.as_deref(),
         dry_run,
         quiet,
+        use_validation,
     );
 
     if !quiet {
@@ -1280,7 +1396,7 @@ fn main() {
         }
     }
 
-    if !quiet {
+    if !quiet && text_output {
         write_footer(&mut out);
     }
 
