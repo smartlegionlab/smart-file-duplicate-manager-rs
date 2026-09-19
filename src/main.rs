@@ -1,8 +1,9 @@
 use blake3::Hasher;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,17 @@ struct Cli {
 
     #[arg(long = "follow-links")]
     follow_links: bool,
+
+    #[arg(long = "keep", value_enum, default_value_t = KeepStrategy::First)]
+    keep: KeepStrategy,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum KeepStrategy {
+    First,
+    Newest,
+    Oldest,
+    Shortest,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +100,16 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{:.2} {}", size, UNITS[unit])
     }
+}
+
+fn display_path(path: &Path) -> String {
+    if let Some(home) = env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        if let Ok(rel) = path.strip_prefix(&home) {
+            return format!("~/{}", rel.display());
+        }
+    }
+    path.display().to_string()
 }
 
 fn phase_bar(prefix: &str) -> ProgressBar {
@@ -279,39 +301,6 @@ fn phase_hash_full(groups: Vec<Vec<FileEntry>>) -> Vec<Vec<FileEntry>> {
     out
 }
 
-fn phase_confirm(groups: Vec<Vec<FileEntry>>) -> Vec<Vec<FileEntry>> {
-    let start = Instant::now();
-
-    let confirmed: Vec<Vec<FileEntry>> = groups
-        .into_par_iter()
-        .filter_map(|group| {
-            let reference = &group[0];
-            let mut same = vec![reference.clone()];
-
-            for other in group.iter().skip(1) {
-                if files_equal(reference, other) {
-                    same.push(other.clone());
-                }
-            }
-
-            if same.len() > 1 {
-                Some(same)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let total: usize = confirmed.iter().map(|g| g.len()).sum();
-    println!(
-        "[5/5] Confirming:   {} groups, {} files ({:.2}s)",
-        confirmed.len(),
-        total,
-        start.elapsed().as_secs_f64()
-    );
-    confirmed
-}
-
 fn files_equal(a: &FileEntry, b: &FileEntry) -> bool {
     if a.size != b.size {
         return false;
@@ -349,9 +338,83 @@ fn files_equal(a: &FileEntry, b: &FileEntry) -> bool {
     }
 }
 
-fn print_report(groups: &[Vec<FileEntry>]) {
+fn phase_confirm(groups: Vec<Vec<FileEntry>>) -> Vec<Vec<FileEntry>> {
+    let start = Instant::now();
+
+    let confirmed: Vec<Vec<FileEntry>> = groups
+        .into_par_iter()
+        .filter_map(|group| {
+            let reference = &group[0];
+            let mut same = vec![reference.clone()];
+
+            for other in group.iter().skip(1) {
+                if files_equal(reference, other) {
+                    same.push(other.clone());
+                }
+            }
+
+            if same.len() > 1 {
+                Some(same)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let total: usize = confirmed.iter().map(|g| g.len()).sum();
+    println!(
+        "[5/5] Confirming:   {} groups, {} files ({:.2}s)",
+        confirmed.len(),
+        total,
+        start.elapsed().as_secs_f64()
+    );
+    confirmed
+}
+
+fn pick_keeper(group: &[FileEntry], strategy: KeepStrategy) -> usize {
+    match strategy {
+        KeepStrategy::First => {
+            let mut idx = 0;
+            for i in 1..group.len() {
+                if group[i].path < group[idx].path {
+                    idx = i;
+                }
+            }
+            idx
+        }
+        KeepStrategy::Newest => {
+            let mut idx = 0;
+            for i in 1..group.len() {
+                if group[i].mtime > group[idx].mtime {
+                    idx = i;
+                }
+            }
+            idx
+        }
+        KeepStrategy::Oldest => {
+            let mut idx = 0;
+            for i in 1..group.len() {
+                if group[i].mtime < group[idx].mtime {
+                    idx = i;
+                }
+            }
+            idx
+        }
+        KeepStrategy::Shortest => {
+            let mut idx = 0;
+            for i in 1..group.len() {
+                if group[i].path.as_os_str().len() < group[idx].path.as_os_str().len() {
+                    idx = i;
+                }
+            }
+            idx
+        }
+    }
+}
+
+fn print_report(groups: &[Vec<FileEntry>], strategy: KeepStrategy) {
     println!();
-    println!("=== Duplicate report ===");
+    println!("=== Duplicate report (keep: {:?}) ===", strategy);
     println!();
 
     if groups.is_empty() {
@@ -359,31 +422,37 @@ fn print_report(groups: &[Vec<FileEntry>]) {
         return;
     }
 
+    let mut indexed: Vec<(usize, &Vec<FileEntry>)> = groups.iter().enumerate().collect();
+    indexed.sort_by(|a, b| {
+        let wa = a.1[0].size * (a.1.len() as u64);
+        let wb = b.1[0].size * (b.1.len() as u64);
+        wb.cmp(&wa)
+    });
+
     let total_files: usize = groups.iter().map(|g| g.len()).sum();
     let wasted: u64 = groups
         .iter()
         .map(|g| g[0].size * (g.len() as u64 - 1))
         .sum();
 
-    let mut sorted: Vec<&Vec<FileEntry>> = groups.iter().collect();
-    sorted.sort_by(|a, b| {
-        let wa = a[0].size * (a.len() as u64);
-        let wb = b[0].size * (b.len() as u64);
-        wb.cmp(&wa)
-    });
-
-    for (i, group) in sorted.iter().enumerate() {
+    for (display_idx, (_orig_idx, group)) in indexed.iter().enumerate() {
         let size = group[0].size;
         let group_wasted = size * (group.len() as u64 - 1);
+        let keeper = pick_keeper(group, strategy);
+
         println!(
             "Group #{} — {} files, {} each, {} wasted",
-            i + 1,
+            display_idx + 1,
             group.len(),
             format_size(size),
             format_size(group_wasted)
         );
-        for f in group.iter() {
-            println!("  {}", f.path.display());
+
+        println!("  [KEEP] {}", display_path(&group[keeper].path));
+        for (i, f) in group.iter().enumerate() {
+            if i != keeper {
+                println!("  [DEL]  {}", display_path(&f.path));
+            }
         }
         println!();
     }
@@ -394,6 +463,7 @@ fn print_report(groups: &[Vec<FileEntry>]) {
         total_files,
         format_size(wasted),
     );
+    println!("Nothing was deleted. This is a report only.");
 }
 
 fn main() {
@@ -419,7 +489,7 @@ fn main() {
     let by_full = phase_hash_full(by_prefix);
     let confirmed = phase_confirm(by_full);
 
-    print_report(&confirmed);
+    print_report(&confirmed, cli.keep);
 
     print_footer();
 }
