@@ -125,6 +125,59 @@ cargo build --release
 
 Binary: `target/release/smart_file_duplicate_manager`
 
+### Install for system-wide use (Linux)
+
+After building, you can call the tool from any directory — no path needed.
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$PWD/target/release/smart_file_duplicate_manager" ~/.local/bin/sfdm
+```
+
+Make sure `~/.local/bin` is in your `PATH`:
+
+```bash
+echo $PATH | tr ':' '\n' | grep -q "$HOME/.local/bin" && echo "OK" || echo "NOT IN PATH"
+```
+
+If it prints `NOT IN PATH`, add this line to `~/.bashrc` (or `~/.zshrc`):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then reload the shell config:
+
+```bash
+source ~/.bashrc
+```
+
+Verify the installation:
+
+```bash
+which sfdm
+sfdm --version
+```
+
+Now you can run it from anywhere:
+
+```bash
+sfdm --path ~/Downloads
+sfdm --path /media/data --min-size 1073741824
+sfdm --help
+```
+
+**Why a symlink?** After every `cargo build --release`, `sfdm` already points
+to the fresh binary. No reinstall needed.
+
+**Remove at any time:**
+
+```bash
+rm ~/.local/bin/sfdm
+```
+
+No `sudo`, no system directories touched.
+
 ## Usage
 
 ```
@@ -657,7 +710,8 @@ never touch real files.
 - **Integration tests** exercise the compiled binary via `assert_cmd`:
   scanning, JSON output, JSON file cleanliness, `--from-report`, dry-run,
   argument errors, shell output, filters, keep strategies, interactive TTY
-  requirement, `--interactive` + `--output shell` conflict.
+  requirement, `--interactive` + `--output shell` conflict, and file system
+  state after each action (KEEP survives, DEL is removed/moved).
 
 Dev-dependencies: `assert_cmd`, `predicates`, `tempfile`.
 
@@ -920,6 +974,7 @@ Before each commit, ensure:
 13. Phase logs and progress bars visible in terminal even with `--output-file`.
 14. `--interactive` without TTY — error.
 15. `--interactive` + `--output shell` — error.
+16. After any action, KEEP files survive, only DEL files are affected.
 
 ## License
 
