@@ -43,6 +43,7 @@ This one is built around **control** and **safety**:
   and edit before running.
 - **Fast on large files.** An optional sampling mode reads only 3 chunks per
   file (start, middle, end) for 10–100× speedups on multi-gigabyte files.
+- **Human-readable sizes.** Write `300M`, `1.5G`, `500KB` instead of raw bytes.
 
 ## Features
 
@@ -76,7 +77,7 @@ This one is built around **control** and **safety**:
 
 ### Filters
 
-- Minimum and maximum file size
+- Minimum and maximum file size (with human-readable suffixes: `100K`, `10M`, `1G`)
 - Extension allow-list
 - Path exclusion (substring match, prunes subtrees)
 - Hidden files (excluded by default)
@@ -92,7 +93,7 @@ This one is built around **control** and **safety**:
 
 ### Quality
 
-- 55 unit and integration tests
+- 68 unit and integration tests
 - No `unsafe`
 - No warnings on `cargo build --release`
 - Tests run in isolated temporary directories
@@ -163,7 +164,7 @@ Now you can run it from anywhere:
 
 ```bash
 sfdm --path ~/Downloads
-sfdm --path /media/data --min-size 1073741824
+sfdm --path /media/data --min-size 1G
 sfdm --help
 ```
 
@@ -198,10 +199,10 @@ smart_file_duplicate_manager -p ~/Pictures
 |------------------------------|----------------------------------------------------------------------------------------|----------|
 | `-p, --path <PATH>`          | Directory to scan (required unless `--from-report` is used)                            | —        |
 | `--from-report <FILE>`       | Load duplicate groups from a JSON report instead of scanning                           | —        |
-| `--min-size <BYTES>`         | Minimum file size                                                                      | `1`      |
-| `--max-size <BYTES>`         | Maximum file size                                                                      | —        |
-| `--sample-chunk <BYTES>`     | Read only 3 chunks (start/middle/end) of large files (0 = read fully)                  | `0`      |
-| `--sample-threshold <BYTES>` | Apply sampling only to files at least this large                                       | `100 MB` |
+| `--min-size <SIZE>`          | Minimum file size (e.g. `1`, `100K`, `10M`, `1.5G`)                                    | `1`      |
+| `--max-size <SIZE>`          | Maximum file size (e.g. `100M`, `1G`)                                                  | —        |
+| `--sample-chunk <SIZE>`      | Read only 3 chunks (start/middle/end) of large files (0 = read fully, e.g. `4M`)       | `0`      |
+| `--sample-threshold <SIZE>`  | Apply sampling only to files at least this large (e.g. `100M`, `500M`)                 | `100M`   |
 | `--ext <LIST>`               | Only these extensions (comma-separated)                                                | —        |
 | `--exclude <LIST>`           | Skip paths containing these substrings                                                 | —        |
 | `--hidden`                   | Include hidden files                                                                   | `false`  |
@@ -217,6 +218,12 @@ smart_file_duplicate_manager -p ~/Pictures
 | `--output <FORMAT>`          | `text`, `json`, or `shell` (shell requires `--action delete\|move\|hardlink`)          | `text`   |
 | `--output-file <PATH>`       | Write output to file                                                                   | —        |
 | `--color <WHEN>`             | `auto`, `always`, `never`                                                              | `auto`   |
+
+**Size format:** `--min-size`, `--max-size`, `--sample-chunk`, and
+`--sample-threshold` accept plain numbers (bytes) and human-readable
+suffixes: `K` / `KB` / `KiB`, `M` / `MB` / `MiB`, `G` / `GB` / `GiB`,
+`T` / `TB` / `TiB`. Both `300M` and `300 MB` are accepted. All suffixes are
+1024-based (IEC): `1M = 1048576` bytes.
 
 ### Actions
 
@@ -279,7 +286,7 @@ Find duplicates larger than 10 MB, exclude `.git` and `node_modules`:
 
 ```bash
 smart_file_duplicate_manager --path ~/Projects \
-    --min-size 10485760 \
+    --min-size 10M \
     --exclude .git,node_modules,target
 ```
 
@@ -321,10 +328,10 @@ smart_file_duplicate_manager --path ~/Downloads
 smart_file_duplicate_manager --path .
 
 # Only files larger than 100 MB
-smart_file_duplicate_manager --path ~/Videos --min-size 104857600
+smart_file_duplicate_manager --path ~/Videos --min-size 100M
 
 # Only files between 10 MB and 1 GB
-smart_file_duplicate_manager --path ~/Videos --min-size 10485760 --max-size 1073741824
+smart_file_duplicate_manager --path ~/Videos --min-size 10M --max-size 1G
 
 # Only images
 smart_file_duplicate_manager --path ~/Photos --ext jpg,jpeg,png,heic
@@ -430,13 +437,13 @@ Prompt keys:
 
 ```bash
 # Sample 3 chunks per large file (fast, not guaranteed)
-smart_file_duplicate_manager --path /media/data --sample-chunk 4194304
+smart_file_duplicate_manager --path /media/data --sample-chunk 4M
 
 # Sample only files >= 500 MB, with 4 MB chunks
 smart_file_duplicate_manager --path /media/data \
-    --min-size 524288000 \
-    --sample-chunk 4194304 \
-    --sample-threshold 524288000
+    --min-size 500M \
+    --sample-chunk 4M \
+    --sample-threshold 500M
 ```
 
 ### Reuse a saved report (no rescanning)
@@ -444,7 +451,7 @@ smart_file_duplicate_manager --path /media/data \
 ```bash
 # Step 1: scan once and save
 smart_file_duplicate_manager --path /media/data \
-    --min-size 104857600 \
+    --min-size 100M \
     --output json --output-file /tmp/dupes.json
 
 # Step 2: inspect the plan (instant)
@@ -468,20 +475,20 @@ smart_file_duplicate_manager --from-report /tmp/dupes.json \
 smart_file_duplicate_manager --path ~/Downloads
 
 # Find duplicate movies larger than 1 GB, preview trash plan
-smart_file_duplicate_manager --path ~/Videos --min-size 1073741824 --action trash
+smart_file_duplicate_manager --path ~/Videos --min-size 1G --action trash
 
 # Find duplicate .zip archives larger than 300 MB
-smart_file_duplicate_manager --path /media/data --min-size 314572800 --ext zip
+smart_file_duplicate_manager --path /media/data --min-size 300M --ext zip
 
 # Find duplicate .iso images larger than 1 GB, save report
 smart_file_duplicate_manager --path /media/data \
-    --min-size 1073741824 --ext iso \
+    --min-size 1G --ext iso \
     --output json --output-file /tmp/iso_dupes.json
 
 # Fast scan of a huge disk for large-file duplicates
 smart_file_duplicate_manager --path /media/data \
-    --min-size 524288000 \
-    --sample-chunk 4194304 \
+    --min-size 500M \
+    --sample-chunk 4M \
     --group-by-dir
 
 # Scan music library, keep the newest copy of each track
@@ -514,8 +521,8 @@ smart_file_duplicate_manager --version
 By default, every candidate file is read in full. For very large files on
 slow storage this can take a long time.
 
-The `--sample-chunk <BYTES>` flag enables a faster mode: files larger than
-`--sample-threshold <BYTES>` (default 100 MB) are read in three chunks —
+The `--sample-chunk <SIZE>` flag enables a faster mode: files larger than
+`--sample-threshold <SIZE>` (default 100M) are read in three chunks —
 beginning, middle, and end — instead of the full file.
 
 ```
@@ -534,8 +541,8 @@ Example — 4 MB chunks, threshold 100 MB (fast, not guaranteed):
 
 ```bash
 smart_file_duplicate_manager --path /media/data \
-    --sample-chunk 4194304 \
-    --sample-threshold 104857600
+    --sample-chunk 4M \
+    --sample-threshold 100M
 ```
 
 The report includes a note about the active sampling mode:
@@ -552,7 +559,7 @@ inspect it, then apply actions later without rescanning.
 ```bash
 # 1. Scan and save the report
 smart_file_duplicate_manager --path /media/data \
-    --min-size 104857600 \
+    --min-size 100M \
     --output json --output-file /tmp/dupes.json
 
 # 2. Inspect the plan from the saved report (no rescanning)
@@ -589,7 +596,7 @@ Supported actions:
 |------------|----------------------------------------------------------------|
 | `delete`   | `rm -- <path>`                                                 |
 | `move`     | `mv -- <src> <--action-dir>/<name>`                            |
-| `hardlink` | `ln -f -- <keep> <tmp> && rm -- <del> && mv -- <tmp> <del>`    |
+| `hardlink` | `ln -f -- <keep> <tmp> && rm -- <del> && mv -- -- <tmp> <del>` |
 
 **Not supported:**
 

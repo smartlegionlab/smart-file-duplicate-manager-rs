@@ -38,12 +38,13 @@ never touch real files.
 
 - **Unit tests** cover `format_size`, `shell_quote`, `pick_keeper`,
   `files_equal`, `validate_entry`, `load_groups_from_json`, `SampleConfig`,
-  `is_leap_year`, `parse_confirm`.
+  `is_leap_year`, `parse_confirm`, `parse_size_arg`, `parse_size_nonzero`.
 - **Integration tests** exercise the compiled binary via `assert_cmd`:
   scanning, JSON output, JSON file cleanliness, `--from-report`, dry-run,
   argument errors, shell output, filters, keep strategies, interactive TTY
-  requirement, `--interactive` + `--output shell` conflict, and file system
-  state after each action (KEEP survives, DEL is removed or moved).
+  requirement, `--interactive` + `--output shell` conflict, human-readable
+  size suffixes, and file system state after each action (KEEP survives,
+  DEL is removed or moved).
 
 Dev-dependencies: `assert_cmd`, `predicates`, `tempfile`.
 
@@ -91,8 +92,8 @@ rm -f /tmp/dupes_test.json
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/
 
 # Filters
-./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1000
-./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --max-size 5000000
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1K
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --max-size 5M
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --ext txt
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --exclude b
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --hidden
@@ -114,6 +115,27 @@ rm -f /tmp/dupes_test.json
 python3 -c "import json; d=json.load(open('/tmp/dupes_test.json')); print('valid JSON, groups:', len(d['groups']))"
 ```
 
+### Test — human-readable size suffixes
+
+```bash
+# All of these should be accepted and produce the same effect as their byte form.
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1K
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1KB
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1KiB
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 10M
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1G
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1.5G
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size "300 MB"
+
+# Invalid values must fail with a clear error.
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size garbage
+./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ --min-size 1X
+```
+
+Expected: valid forms accepted; invalid forms fail with
+`error: invalid value 'garbage' for '--min-size <SIZE>': invalid number in size 'garbage'`.
+
 ### Test — sampling correctness
 
 ```bash
@@ -124,7 +146,7 @@ dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
 cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
 dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=1000000 conv=notrunc 2>/dev/null
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
-    --sample-chunk 4194304 --sample-threshold 104857600
+    --sample-chunk 4M --sample-threshold 100M
 
 # Difference at 104 MB (inside middle chunk) → must be 0 groups
 rm -rf /tmp/dupes_test
@@ -133,7 +155,7 @@ dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
 cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
 dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=104000000 conv=notrunc 2>/dev/null
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
-    --sample-chunk 4194304 --sample-threshold 104857600
+    --sample-chunk 4M --sample-threshold 100M
 
 # Difference at 208 MB (inside last chunk) → must be 0 groups
 rm -rf /tmp/dupes_test
@@ -142,7 +164,7 @@ dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
 cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_modified.bin
 dd if=/dev/zero of=/tmp/dupes_test/b/big_modified.bin bs=1 count=100 seek=208000000 conv=notrunc 2>/dev/null
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
-    --sample-chunk 4194304 --sample-threshold 104857600
+    --sample-chunk 4M --sample-threshold 100M
 
 # Identical files → must be 1 group
 rm -rf /tmp/dupes_test
@@ -150,7 +172,7 @@ mkdir -p /tmp/dupes_test/a /tmp/dupes_test/b
 dd if=/dev/urandom of=/tmp/dupes_test/a/big.bin bs=1M count=200 2>/dev/null
 cp /tmp/dupes_test/a/big.bin /tmp/dupes_test/b/big_copy.bin
 ./target/release/smart_file_duplicate_manager --path /tmp/dupes_test/ \
-    --sample-chunk 4194304 --sample-threshold 104857600
+    --sample-chunk 4M --sample-threshold 100M
 ```
 
 ### Test — actions (safe, on sandbox)
@@ -317,4 +339,5 @@ Before each commit, ensure:
 14. `--interactive` without TTY — error.
 15. `--interactive` + `--output shell` — error.
 16. After any action, KEEP files survive, only DEL files are affected.
+17. Size arguments accept both bytes and human-readable suffixes (`100K`, `10M`, `1.5G`).
 
