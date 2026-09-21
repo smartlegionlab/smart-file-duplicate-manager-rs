@@ -622,6 +622,7 @@ fn phase_hash_full(
             .unwrap()
             .progress_chars("#>-"),
         );
+        pb.tick();
         Some(pb)
     };
 
@@ -789,6 +790,7 @@ fn phase_confirm(
             .unwrap()
             .progress_chars("#>-"),
         );
+        pb.tick();
         Some(pb)
     };
 
