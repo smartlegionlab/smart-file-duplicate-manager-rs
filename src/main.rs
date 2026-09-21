@@ -776,6 +776,24 @@ fn phase_confirm(
 ) -> Vec<Vec<FileEntry>> {
     let start = Instant::now();
 
+    let total_pairs: u64 = groups.iter().map(|g| g.len().saturating_sub(1) as u64).sum();
+
+    let pb = if quiet {
+        None
+    } else {
+        let pb = ProgressBar::new(total_pairs);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [5/5] Confirming: [{bar:40.cyan/blue}] {pos}/{len}",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+        );
+        Some(pb)
+    };
+
+    let pb_ref = pb.as_ref();
+
     let confirmed: Vec<Vec<FileEntry>> = groups
         .into_par_iter()
         .filter_map(|group| {
@@ -786,6 +804,9 @@ fn phase_confirm(
                 if files_equal(reference, other, sample) {
                     same.push(other.clone());
                 }
+                if let Some(pb) = pb_ref {
+                    pb.inc(1);
+                }
             }
 
             if same.len() > 1 {
@@ -795,6 +816,10 @@ fn phase_confirm(
             }
         })
         .collect();
+
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+    }
 
     let total: usize = confirmed.iter().map(|g| g.len()).sum();
     if !quiet {
