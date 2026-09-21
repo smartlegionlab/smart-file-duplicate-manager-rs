@@ -489,7 +489,6 @@ fn test_from_report_validates_changed_file_and_skips() {
         .assert()
         .success();
 
-    // Modify the file that was going to be deleted.
     fs::write(&b_file, b"MODIFIED CONTENT").unwrap();
 
     bin()
@@ -509,4 +508,84 @@ fn test_from_report_validates_changed_file_and_skips() {
         b_file.exists(),
         "changed DEL file must survive validation rejection"
     );
+}
+
+#[test]
+fn test_min_size_with_human_readable_suffix() {
+    let dir = make_sandbox();
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--min-size", "1K"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[KEEP]"));
+
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--min-size", "10M"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No duplicates found"));
+}
+
+#[test]
+fn test_max_size_with_human_readable_suffix() {
+    let dir = make_sandbox();
+
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--max-size", "2M"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[KEEP]"));
+
+    let output = bin()
+        .args(["--path", &sandbox_path(&dir), "--max-size", "500K"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    assert!(
+        text.contains("file1.txt"),
+        "--max-size 500K should keep the small files"
+    );
+    assert!(
+        !text.contains("big.bin") && !text.contains("big_copy.bin"),
+        "--max-size 500K should exclude the 1 MB files"
+    );
+}
+
+#[test]
+fn test_byte_suffix_still_works() {
+    let dir = make_sandbox();
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--min-size", "1048576"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_sample_threshold_with_suffix() {
+    let dir = make_sandbox();
+    bin()
+        .args([
+            "--path",
+            &sandbox_path(&dir),
+            "--sample-chunk",
+            "1M",
+            "--sample-threshold",
+            "100K",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Sampling:"));
+}
+
+#[test]
+fn test_min_size_invalid_value() {
+    let dir = make_sandbox();
+    bin()
+        .args(["--path", &sandbox_path(&dir), "--min-size", "garbage"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid size"));
 }

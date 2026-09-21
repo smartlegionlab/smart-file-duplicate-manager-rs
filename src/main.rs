@@ -18,7 +18,52 @@ const GITHUB: &str = "smartlegionlab";
 const REPO_URL: &str = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs";
 
 const PREFIX_BYTES: u64 = 4096;
-const DEFAULT_SAMPLE_THRESHOLD: u64 = 100 * 1024 * 1024;
+
+fn parse_size_arg(s: &str) -> Result<u64, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("empty size".to_string());
+    }
+
+    let split_pos = trimmed
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit() && *c != '.')
+        .map(|(i, _)| i)
+        .unwrap_or(trimmed.len());
+
+    if split_pos == 0 {
+        return Err(format!("invalid size '{}'", s));
+    }
+
+    let (num_part, suffix_part) = trimmed.split_at(split_pos);
+    let num: f64 = num_part
+        .parse()
+        .map_err(|_| format!("invalid number in size '{}'", s))?;
+    if num < 0.0 {
+        return Err(format!("negative size '{}'", s));
+    }
+
+    let suffix = suffix_part.trim().to_ascii_lowercase();
+    let multiplier: u64 = match suffix.as_str() {
+        "" | "b" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        "t" | "tb" | "tib" => 1024 * 1024 * 1024 * 1024,
+        _ => return Err(format!("unknown size suffix '{}' in '{}'", suffix_part, s)),
+    };
+
+    let result = (num * multiplier as f64) as u64;
+    Ok(result)
+}
+
+fn parse_size_nonzero(s: &str) -> Result<u64, String> {
+    let v = parse_size_arg(s)?;
+    if v == 0 {
+        return Err("size must be greater than 0".to_string());
+    }
+    Ok(v)
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -36,16 +81,25 @@ struct Cli {
     #[arg(long = "from-report", value_name = "FILE", help = "Load duplicate groups from a JSON report instead of scanning")]
     from_report: Option<PathBuf>,
 
-    #[arg(long = "min-size", value_name = "BYTES", default_value_t = 1, help = "Minimum file size in bytes")]
+    #[arg(long = "min-size", value_name = "SIZE", default_value = "1",
+          value_parser = parse_size_arg,
+          help = "Minimum file size (e.g. 1, 100K, 10M, 1.5G)")]
     min_size: u64,
 
-    #[arg(long = "max-size", value_name = "BYTES", help = "Maximum file size in bytes")]
+    #[arg(long = "max-size", value_name = "SIZE",
+          value_parser = parse_size_arg,
+          help = "Maximum file size (e.g. 100M, 1G)")]
     max_size: Option<u64>,
 
-    #[arg(long = "sample-chunk", value_name = "BYTES", default_value_t = 0, help = "Sample large files: read only 3 chunks (start/middle/end) of this size instead of the full file (0 = read fully). Note: may miss differences outside sampled regions")]
+    #[arg(long = "sample-chunk", value_name = "SIZE", default_value = "0",
+          value_parser = parse_size_arg,
+          help = "Sample large files: read only 3 chunks (start/middle/end) of this size instead of the full file (0 = read fully, e.g. 4M)")]
     sample_chunk: u64,
 
-    #[arg(long = "sample-threshold", value_name = "BYTES", default_value_t = DEFAULT_SAMPLE_THRESHOLD, help = "Apply sampling only to files at least this large (bytes)")]
+    #[arg(long = "sample-threshold", value_name = "SIZE",
+          default_value = "100M",
+          value_parser = parse_size_nonzero,
+          help = "Apply sampling only to files at least this large (e.g. 100M, 500M, 1G)")]
     sample_threshold: u64,
 
     #[arg(long = "follow-links", help = "Follow symbolic links during scan")]
@@ -2059,5 +2113,63 @@ mod tests {
     fn test_parse_confirm_quit() {
         assert_eq!(parse_confirm("q"), ConfirmChoice::Quit);
         assert_eq!(parse_confirm("quit"), ConfirmChoice::Quit);
+    }
+
+    #[test]
+    fn test_parse_size_arg_bytes() {
+        assert_eq!(parse_size_arg("1").unwrap(), 1);
+        assert_eq!(parse_size_arg("500").unwrap(), 500);
+        assert_eq!(parse_size_arg("1024").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_parse_size_arg_kb() {
+        assert_eq!(parse_size_arg("1K").unwrap(), 1024);
+        assert_eq!(parse_size_arg("100K").unwrap(), 102400);
+        assert_eq!(parse_size_arg("1KB").unwrap(), 1024);
+        assert_eq!(parse_size_arg("1KiB").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_parse_size_arg_mb() {
+        assert_eq!(parse_size_arg("1M").unwrap(), 1024 * 1024);
+        assert_eq!(parse_size_arg("300M").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(parse_size_arg("100MB").unwrap(), 100 * 1024 * 1024);
+        assert_eq!(parse_size_arg("100MiB").unwrap(), 100 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_parse_size_arg_gb() {
+        assert_eq!(parse_size_arg("1G").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_size_arg("1GB").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_size_arg("1.5G").unwrap(), 1610612736);
+    }
+
+    #[test]
+    fn test_parse_size_arg_with_space() {
+        assert_eq!(parse_size_arg("300 MB").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(parse_size_arg("1 GB").unwrap(), 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_parse_size_arg_case_insensitive() {
+        assert_eq!(parse_size_arg("300m").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(parse_size_arg("300M").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(parse_size_arg("1g").unwrap(), 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_parse_size_arg_invalid() {
+        assert!(parse_size_arg("garbage").is_err());
+        assert!(parse_size_arg("").is_err());
+        assert!(parse_size_arg("M").is_err());
+    }
+
+    #[test]
+    fn test_parse_size_nonzero_rejects_zero() {
+        assert!(parse_size_nonzero("0").is_err());
+        assert!(parse_size_nonzero("0M").is_err());
+        assert_eq!(parse_size_nonzero("1").unwrap(), 1);
+        assert_eq!(parse_size_nonzero("1M").unwrap(), 1024 * 1024);
     }
 }
