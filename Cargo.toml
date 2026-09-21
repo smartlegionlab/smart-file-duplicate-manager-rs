@@ -1,6 +1,6 @@
 [package]
 name = "smart_file_duplicate_manager"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Alexander Suvorov <smartlegionlab>"]
 description = "Safe and fast duplicate file manager: multi-stage detection, dry-run, XDG trash, interactive review, reusable reports"

@@ -75,10 +75,19 @@ fn parse_size_nonzero(s: &str) -> Result<u64, String> {
     after_help = "Repository: https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
 )]
 struct Cli {
-    #[arg(short = 'p', long = "path", value_name = "PATH", help = "Directory to scan (required unless --from-report is used)")]
+    #[arg(
+        short = 'p',
+        long = "path",
+        value_name = "PATH",
+        help = "Directory to scan (required unless --from-report is used)"
+    )]
     path: Option<PathBuf>,
 
-    #[arg(long = "from-report", value_name = "FILE", help = "Load duplicate groups from a JSON report instead of scanning")]
+    #[arg(
+        long = "from-report",
+        value_name = "FILE",
+        help = "Load duplicate groups from a JSON report instead of scanning"
+    )]
     from_report: Option<PathBuf>,
 
     #[arg(long = "min-size", value_name = "SIZE", default_value = "1",
@@ -108,10 +117,20 @@ struct Cli {
     #[arg(long = "hidden", help = "Include hidden files and directories")]
     hidden: bool,
 
-    #[arg(long = "ext", value_name = "LIST", value_delimiter = ',', help = "Only these file extensions (comma-separated)")]
+    #[arg(
+        long = "ext",
+        value_name = "LIST",
+        value_delimiter = ',',
+        help = "Only these file extensions (comma-separated)"
+    )]
     ext: Vec<String>,
 
-    #[arg(long = "exclude", value_name = "LIST", value_delimiter = ',', help = "Skip paths containing these substrings (comma-separated)")]
+    #[arg(
+        long = "exclude",
+        value_name = "LIST",
+        value_delimiter = ',',
+        help = "Skip paths containing these substrings (comma-separated)"
+    )]
     exclude: Vec<String>,
 
     #[arg(long = "keep", value_enum, default_value_t = KeepStrategy::First, help = "Which file to keep in each duplicate group")]
@@ -120,7 +139,11 @@ struct Cli {
     #[arg(long = "action", value_enum, default_value_t = Action::Report, help = "What to do with duplicates")]
     action: Action,
 
-    #[arg(long = "action-dir", value_name = "DIR", help = "Destination directory for the move action")]
+    #[arg(
+        long = "action-dir",
+        value_name = "DIR",
+        help = "Destination directory for the move action"
+    )]
     action_dir: Option<PathBuf>,
 
     #[arg(long = "yes", help = "Execute destructive actions (otherwise dry-run)")]
@@ -129,19 +152,33 @@ struct Cli {
     #[arg(long = "dry-run", help = "Force dry-run even with --yes")]
     dry_run: bool,
 
-    #[arg(long = "interactive", help = "Ask confirmation for each file (requires a TTY)")]
+    #[arg(
+        long = "interactive",
+        help = "Ask confirmation for each file (requires a TTY)"
+    )]
     interactive: bool,
 
-    #[arg(long = "limit", value_name = "N", help = "Show only top N groups in the report")]
+    #[arg(
+        long = "limit",
+        value_name = "N",
+        help = "Show only top N groups in the report"
+    )]
     limit: Option<usize>,
 
-    #[arg(long = "group-by-dir", help = "Show directories with the most duplicates")]
+    #[arg(
+        long = "group-by-dir",
+        help = "Show directories with the most duplicates"
+    )]
     group_by_dir: bool,
 
     #[arg(long = "output", value_enum, default_value_t = OutputFormat::Text, help = "Output format: text, json, or shell script (requires --action delete|move|hardlink)")]
     output: OutputFormat,
 
-    #[arg(long = "output-file", value_name = "PATH", help = "Write output to a file instead of stdout")]
+    #[arg(
+        long = "output-file",
+        value_name = "PATH",
+        help = "Write output to a file instead of stdout"
+    )]
     output_file: Option<PathBuf>,
 
     #[arg(long = "color", value_enum, default_value_t = ColorMode::Auto, help = "Colorize output")]
@@ -831,7 +868,10 @@ fn phase_confirm(
 ) -> Vec<Vec<FileEntry>> {
     let start = Instant::now();
 
-    let total_pairs: u64 = groups.iter().map(|g| g.len().saturating_sub(1) as u64).sum();
+    let total_pairs: u64 = groups
+        .iter()
+        .map(|g| g.len().saturating_sub(1) as u64)
+        .sum();
 
     let pb = if quiet {
         None
@@ -1276,11 +1316,7 @@ fn print_shell_script(
                     let dir = action_dir.unwrap();
                     let name = f.path.file_name().unwrap_or_default();
                     let dest = dir.join(name);
-                    format!(
-                        "mv -- {} {}",
-                        shell_quote(&f.path),
-                        shell_quote(&dest)
-                    )
+                    format!("mv -- {} {}", shell_quote(&f.path), shell_quote(&dest))
                 }
                 Action::Hardlink => {
                     let tmp = f.path.with_extension("sfdm_tmp");
@@ -1663,7 +1699,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    let (prepared, root_for_report, use_validation) = if let Some(ref report_path) = cli.from_report {
+    let (prepared, root_for_report, use_validation) = if let Some(ref report_path) = cli.from_report
+    {
         let groups = match load_groups_from_json(report_path) {
             Ok(g) => g,
             Err(e) => {
@@ -1860,11 +1897,7 @@ mod tests {
         fs::write(&path, content).unwrap();
         let meta = fs::metadata(&path).unwrap();
         let size = meta.len();
-        FileEntry {
-            path,
-            size,
-            mtime,
-        }
+        FileEntry { path, size, mtime }
     }
 
     #[test]
@@ -1920,8 +1953,16 @@ mod tests {
 
     #[test]
     fn test_pick_keeper_first() {
-        let a = FileEntry { path: PathBuf::from("/a/z"), size: 10, mtime: 100 };
-        let b = FileEntry { path: PathBuf::from("/a/a"), size: 10, mtime: 200 };
+        let a = FileEntry {
+            path: PathBuf::from("/a/z"),
+            size: 10,
+            mtime: 100,
+        };
+        let b = FileEntry {
+            path: PathBuf::from("/a/a"),
+            size: 10,
+            mtime: 200,
+        };
         let group = vec![a, b];
         let idx = pick_keeper(&group, KeepStrategy::First);
         assert_eq!(idx, 1);
@@ -1929,8 +1970,16 @@ mod tests {
 
     #[test]
     fn test_pick_keeper_newest() {
-        let a = FileEntry { path: PathBuf::from("/a/x"), size: 10, mtime: 100 };
-        let b = FileEntry { path: PathBuf::from("/a/y"), size: 10, mtime: 200 };
+        let a = FileEntry {
+            path: PathBuf::from("/a/x"),
+            size: 10,
+            mtime: 100,
+        };
+        let b = FileEntry {
+            path: PathBuf::from("/a/y"),
+            size: 10,
+            mtime: 200,
+        };
         let group = vec![a, b];
         let idx = pick_keeper(&group, KeepStrategy::Newest);
         assert_eq!(idx, 1);
@@ -1938,8 +1987,16 @@ mod tests {
 
     #[test]
     fn test_pick_keeper_oldest() {
-        let a = FileEntry { path: PathBuf::from("/a/x"), size: 10, mtime: 100 };
-        let b = FileEntry { path: PathBuf::from("/a/y"), size: 10, mtime: 200 };
+        let a = FileEntry {
+            path: PathBuf::from("/a/x"),
+            size: 10,
+            mtime: 100,
+        };
+        let b = FileEntry {
+            path: PathBuf::from("/a/y"),
+            size: 10,
+            mtime: 200,
+        };
         let group = vec![a, b];
         let idx = pick_keeper(&group, KeepStrategy::Oldest);
         assert_eq!(idx, 0);
@@ -1947,8 +2004,16 @@ mod tests {
 
     #[test]
     fn test_pick_keeper_shortest() {
-        let a = FileEntry { path: PathBuf::from("/very/long/path/x"), size: 10, mtime: 100 };
-        let b = FileEntry { path: PathBuf::from("/short"), size: 10, mtime: 100 };
+        let a = FileEntry {
+            path: PathBuf::from("/very/long/path/x"),
+            size: 10,
+            mtime: 100,
+        };
+        let b = FileEntry {
+            path: PathBuf::from("/short"),
+            size: 10,
+            mtime: 100,
+        };
         let group = vec![a, b];
         let idx = pick_keeper(&group, KeepStrategy::Shortest);
         assert_eq!(idx, 1);
@@ -1959,7 +2024,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let a = tmp_file(tmp.path(), "a", b"hello world", 100);
         let b = tmp_file(tmp.path(), "b", b"hello world", 100);
-        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        let sample = SampleConfig {
+            chunk: 0,
+            threshold: 0,
+        };
         assert!(files_equal(&a, &b, sample));
     }
 
@@ -1968,7 +2036,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let a = tmp_file(tmp.path(), "a", b"hello", 100);
         let b = tmp_file(tmp.path(), "b", b"world", 100);
-        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        let sample = SampleConfig {
+            chunk: 0,
+            threshold: 0,
+        };
         assert!(!files_equal(&a, &b, sample));
     }
 
@@ -1977,7 +2048,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let a = tmp_file(tmp.path(), "a", b"hello", 100);
         let b = tmp_file(tmp.path(), "b", b"hello world", 100);
-        let sample = SampleConfig { chunk: 0, threshold: 0 };
+        let sample = SampleConfig {
+            chunk: 0,
+            threshold: 0,
+        };
         assert!(!files_equal(&a, &b, sample));
     }
 
@@ -1992,7 +2066,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let entry = FileEntry { mtime: real_mtime, ..entry };
+        let entry = FileEntry {
+            mtime: real_mtime,
+            ..entry
+        };
         assert!(validate_entry(&entry).is_ok());
     }
 
@@ -2018,21 +2095,30 @@ mod tests {
 
     #[test]
     fn test_sample_should_sample_disabled() {
-        let s = SampleConfig { chunk: 0, threshold: 100 };
+        let s = SampleConfig {
+            chunk: 0,
+            threshold: 100,
+        };
         assert!(!s.should_sample(1_000_000));
         assert!(!s.active());
     }
 
     #[test]
     fn test_sample_should_sample_below_threshold() {
-        let s = SampleConfig { chunk: 1024, threshold: 100_000 };
+        let s = SampleConfig {
+            chunk: 1024,
+            threshold: 100_000,
+        };
         assert!(!s.should_sample(50_000));
         assert!(s.active());
     }
 
     #[test]
     fn test_sample_should_sample_at_threshold() {
-        let s = SampleConfig { chunk: 1024, threshold: 100_000 };
+        let s = SampleConfig {
+            chunk: 1024,
+            threshold: 100_000,
+        };
         assert!(s.should_sample(100_000));
     }
 

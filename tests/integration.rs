@@ -203,7 +203,9 @@ fn test_shell_rejects_trash() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("does not support the trash action"));
+        .stderr(predicate::str::contains(
+            "does not support the trash action",
+        ));
 }
 
 #[test]
@@ -313,7 +315,9 @@ fn test_interactive_with_shell_output_rejected() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--interactive cannot be combined with --output shell"));
+        .stderr(predicate::str::contains(
+            "--interactive cannot be combined with --output shell",
+        ));
 }
 
 #[test]
@@ -420,10 +424,7 @@ fn test_untouched_file_survives_action() {
         .assert()
         .success();
 
-    assert!(
-        a_unique.exists(),
-        "file with no duplicates must survive"
-    );
+    assert!(a_unique.exists(), "file with no duplicates must survive");
     assert!(
         b_unique.exists(),
         "file not in the duplicate list must survive"
