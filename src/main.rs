@@ -622,7 +622,7 @@ fn phase_hash_full(
             .unwrap()
             .progress_chars("#>-"),
         );
-        pb.tick();
+        pb.enable_steady_tick(Duration::from_millis(100));
         Some(pb)
     };
 
@@ -790,7 +790,7 @@ fn phase_confirm(
             .unwrap()
             .progress_chars("#>-"),
         );
-        pb.tick();
+        pb.enable_steady_tick(Duration::from_millis(100));
         Some(pb)
     };
 
