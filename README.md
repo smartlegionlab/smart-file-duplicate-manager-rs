@@ -116,7 +116,7 @@ probabilistic check — see the sampling section below.
 
 ## Installation
 
-Requires Rust 1.70 or newer.
+Requires Rust 1.85 or newer (edition 2024).
 
 ```bash
 git clone https://github.com/smartlegionlab/smart-file-duplicate-manager-rs
@@ -124,7 +124,10 @@ cd smart-file-duplicate-manager-rs
 cargo build --release
 ```
 
-Binary: `target/release/smart_file_duplicate_manager`
+Binary: `target/release/sfdm`.
+
+Result files are written to the `results/` directory, which is created
+automatically on the first run.
 
 ### Install for system-wide use (Linux)
 
@@ -132,7 +135,7 @@ After building, you can call the tool from any directory — no path needed.
 
 ```bash
 mkdir -p ~/.local/bin
-ln -sf "$PWD/target/release/smart_file_duplicate_manager" ~/.local/bin/sfdm
+ln -sf "$PWD/target/release/sfdm" ~/.local/bin/sfdm
 ```
 
 Make sure `~/.local/bin` is in your `PATH`:
@@ -182,15 +185,15 @@ No `sudo`, no system directories touched.
 ## Usage
 
 ```
-smart_file_duplicate_manager --path <PATH> [OPTIONS]
-smart_file_duplicate_manager --from-report <FILE> [OPTIONS]
+sfdm --path <PATH> [OPTIONS]
+sfdm --from-report <FILE> [OPTIONS]
 ```
 
 ### Basic
 
 ```bash
-smart_file_duplicate_manager --path ~/Downloads
-smart_file_duplicate_manager -p ~/Pictures
+sfdm --path ~/Downloads
+sfdm -p ~/Pictures
 ```
 
 ### Options
@@ -242,7 +245,7 @@ Instead of `--yes` (which confirms everything at once), use `--interactive` to
 confirm each file individually:
 
 ```bash
-smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
+sfdm --path ~/Downloads --action trash --interactive
 ```
 
 For each file you will be prompted:
@@ -270,13 +273,13 @@ Rules:
 Report only (safe):
 
 ```bash
-smart_file_duplicate_manager --path ~/Photos
+sfdm --path ~/Photos
 ```
 
 Only images, keep the newest copy, show top 10 groups:
 
 ```bash
-smart_file_duplicate_manager --path ~/Photos \
+sfdm --path ~/Photos \
     --ext jpg,jpeg,png,heic \
     --keep newest \
     --limit 10
@@ -285,7 +288,7 @@ smart_file_duplicate_manager --path ~/Photos \
 Find duplicates larger than 10 MB, exclude `.git` and `node_modules`:
 
 ```bash
-smart_file_duplicate_manager --path ~/Projects \
+sfdm --path ~/Projects \
     --min-size 10M \
     --exclude .git,node_modules,target
 ```
@@ -293,25 +296,25 @@ smart_file_duplicate_manager --path ~/Projects \
 Preview trash operation (dry-run):
 
 ```bash
-smart_file_duplicate_manager --path ~/Downloads --action trash
+sfdm --path ~/Downloads --action trash
 ```
 
 Execute trash operation:
 
 ```bash
-smart_file_duplicate_manager --path ~/Downloads --action trash --yes
+sfdm --path ~/Downloads --action trash --yes
 ```
 
 Execute trash operation with per-file confirmation:
 
 ```bash
-smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
+sfdm --path ~/Downloads --action trash --interactive
 ```
 
 Export JSON report to file:
 
 ```bash
-smart_file_duplicate_manager --path ~/Music --output json --output-file report.json
+sfdm --path ~/Music --output json --output-file report.json
 ```
 
 ## Command cheat sheet
@@ -322,107 +325,107 @@ Quick reference for common tasks. Copy-paste and adapt the paths.
 
 ```bash
 # Report duplicates in a directory (safe, nothing is deleted)
-smart_file_duplicate_manager --path ~/Downloads
+sfdm --path ~/Downloads
 
 # Report duplicates in current directory
-smart_file_duplicate_manager --path .
+sfdm --path .
 
 # Only files larger than 100 MB
-smart_file_duplicate_manager --path ~/Videos --min-size 100M
+sfdm --path ~/Videos --min-size 100M
 
 # Only files between 10 MB and 1 GB
-smart_file_duplicate_manager --path ~/Videos --min-size 10M --max-size 1G
+sfdm --path ~/Videos --min-size 10M --max-size 1G
 
 # Only images
-smart_file_duplicate_manager --path ~/Photos --ext jpg,jpeg,png,heic
+sfdm --path ~/Photos --ext jpg,jpeg,png,heic
 
 # Only .zip archives
-smart_file_duplicate_manager --path ~/Downloads --ext zip
+sfdm --path ~/Downloads --ext zip
 
 # Exclude .git and node_modules
-smart_file_duplicate_manager --path ~/Projects --exclude .git,node_modules,target
+sfdm --path ~/Projects --exclude .git,node_modules,target
 
 # Include hidden files
-smart_file_duplicate_manager --path ~/Documents --hidden
+sfdm --path ~/Documents --hidden
 
 # Show top 10 groups only
-smart_file_duplicate_manager --path ~/Music --limit 10
+sfdm --path ~/Music --limit 10
 
 # Show directories with the most duplicates
-smart_file_duplicate_manager --path ~/Videos --group-by-dir
+sfdm --path ~/Videos --group-by-dir
 
 # No color (for logs or files)
-smart_file_duplicate_manager --path ~/Downloads --color never
+sfdm --path ~/Downloads --color never
 ```
 
 ### Keep strategies
 
 ```bash
 # Keep the first by path (alphabetical)
-smart_file_duplicate_manager --path ~/Photos --keep first
+sfdm --path ~/Photos --keep first
 
 # Keep the most recently modified
-smart_file_duplicate_manager --path ~/Photos --keep newest
+sfdm --path ~/Photos --keep newest
 
 # Keep the oldest by modification time
-smart_file_duplicate_manager --path ~/Photos --keep oldest
+sfdm --path ~/Photos --keep oldest
 
 # Keep the file with the shortest path
-smart_file_duplicate_manager --path ~/Photos --keep shortest
+sfdm --path ~/Photos --keep shortest
 ```
 
 ### Output formats
 
 ```bash
 # Text (default)
-smart_file_duplicate_manager --path ~/Downloads
+sfdm --path ~/Downloads
 
 # JSON to stdout
-smart_file_duplicate_manager --path ~/Downloads --output json
+sfdm --path ~/Downloads --output json
 
 # JSON to file
-smart_file_duplicate_manager --path ~/Downloads --output json --output-file /tmp/dupes.json
+sfdm --path ~/Downloads --output json --output-file /tmp/dupes.json
 
 # Shell script for review (requires --action delete|move|hardlink)
-smart_file_duplicate_manager --path ~/Downloads --action delete --output shell
+sfdm --path ~/Downloads --action delete --output shell
 
 # Shell script to file
-smart_file_duplicate_manager --path ~/Downloads --action delete --output shell --output-file /tmp/cleanup.sh
+sfdm --path ~/Downloads --action delete --output shell --output-file /tmp/cleanup.sh
 ```
 
 ### Actions (dry-run by default)
 
 ```bash
 # Dry-run (no changes, just the plan)
-smart_file_duplicate_manager --path ~/Downloads --action trash
-smart_file_duplicate_manager --path ~/Downloads --action delete
-smart_file_duplicate_manager --path ~/Downloads --action move --action-dir /tmp/dupes_out
-smart_file_duplicate_manager --path ~/Downloads --action hardlink
+sfdm --path ~/Downloads --action trash
+sfdm --path ~/Downloads --action delete
+sfdm --path ~/Downloads --action move --action-dir /tmp/dupes_out
+sfdm --path ~/Downloads --action hardlink
 
 # Move duplicates to ~/.local/share/Trash (reversible)
-smart_file_duplicate_manager --path ~/Downloads --action trash --yes
+sfdm --path ~/Downloads --action trash --yes
 
 # Move duplicates to a custom folder
-smart_file_duplicate_manager --path ~/Downloads --action move --action-dir /tmp/dupes_out --yes
+sfdm --path ~/Downloads --action move --action-dir /tmp/dupes_out --yes
 
 # Replace duplicates with hard links to the kept file (same filesystem only)
-smart_file_duplicate_manager --path ~/Downloads --action hardlink --yes
+sfdm --path ~/Downloads --action hardlink --yes
 
 # Permanently delete duplicates (irreversible)
-smart_file_duplicate_manager --path ~/Downloads --action delete --yes
+sfdm --path ~/Downloads --action delete --yes
 ```
 
 ### Interactive mode
 
 ```bash
 # Confirm each file individually (requires a TTY)
-smart_file_duplicate_manager --path ~/Downloads --action trash --interactive
+sfdm --path ~/Downloads --action trash --interactive
 
 # Interactive with a saved report (no rescanning)
-smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --interactive
+sfdm --from-report /tmp/dupes.json --action trash --interactive
 
 # Interactive move
-smart_file_duplicate_manager --path ~/Downloads \
+sfdm --path ~/Downloads \
     --action move --action-dir /tmp/dupes_review --interactive
 ```
 
@@ -437,10 +440,10 @@ Prompt keys:
 
 ```bash
 # Sample 3 chunks per large file (fast, not guaranteed)
-smart_file_duplicate_manager --path /media/data --sample-chunk 4M
+sfdm --path /media/data --sample-chunk 4M
 
 # Sample only files >= 500 MB, with 4 MB chunks
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --min-size 500M \
     --sample-chunk 4M \
     --sample-threshold 500M
@@ -450,21 +453,21 @@ smart_file_duplicate_manager --path /media/data \
 
 ```bash
 # Step 1: scan once and save
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --min-size 100M \
     --output json --output-file /tmp/dupes.json
 
 # Step 2: inspect the plan (instant)
-smart_file_duplicate_manager --from-report /tmp/dupes.json
+sfdm --from-report /tmp/dupes.json
 
 # Step 3: apply an action (still dry-run unless --yes is given)
-smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash
+sfdm --from-report /tmp/dupes.json --action trash
 
 # Step 4: execute
-smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --yes
+sfdm --from-report /tmp/dupes.json --action trash --yes
 
 # Step 4 alt: execute with per-file confirmation
-smart_file_duplicate_manager --from-report /tmp/dupes.json \
+sfdm --from-report /tmp/dupes.json \
     --action trash --interactive
 ```
 
@@ -472,34 +475,34 @@ smart_file_duplicate_manager --from-report /tmp/dupes.json \
 
 ```bash
 # Clean duplicates in Downloads (report only)
-smart_file_duplicate_manager --path ~/Downloads
+sfdm --path ~/Downloads
 
 # Find duplicate movies larger than 1 GB, preview trash plan
-smart_file_duplicate_manager --path ~/Videos --min-size 1G --action trash
+sfdm --path ~/Videos --min-size 1G --action trash
 
 # Find duplicate .zip archives larger than 300 MB
-smart_file_duplicate_manager --path /media/data --min-size 300M --ext zip
+sfdm --path /media/data --min-size 300M --ext zip
 
 # Find duplicate .iso images larger than 1 GB, save report
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --min-size 1G --ext iso \
     --output json --output-file /tmp/iso_dupes.json
 
 # Fast scan of a huge disk for large-file duplicates
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --min-size 500M \
     --sample-chunk 4M \
     --group-by-dir
 
 # Scan music library, keep the newest copy of each track
-smart_file_duplicate_manager --path ~/Music --ext mp3,flac,ogg --keep newest
+sfdm --path ~/Music --ext mp3,flac,ogg --keep newest
 
 # Scan photo library, exclude RAW cache folders
-smart_file_duplicate_manager --path ~/Photos --ext jpg,jpeg,png --exclude .cache
+sfdm --path ~/Photos --ext jpg,jpeg,png --exclude .cache
 
 # Safe cleanup: move duplicates to a review folder, then decide manually
 mkdir -p /tmp/dupes_review
-smart_file_duplicate_manager --path ~/Downloads \
+sfdm --path ~/Downloads \
     --action move --action-dir /tmp/dupes_review --yes
 ```
 
@@ -507,13 +510,13 @@ smart_file_duplicate_manager --path ~/Downloads \
 
 ```bash
 # Full help
-smart_file_duplicate_manager --help
+sfdm --help
 
 # Short help
-smart_file_duplicate_manager -h
+sfdm -h
 
 # Version
-smart_file_duplicate_manager --version
+sfdm --version
 ```
 
 ### Large file sampling (optional)
@@ -540,7 +543,7 @@ read in full and compared byte by byte.
 Example — 4 MB chunks, threshold 100 MB (fast, not guaranteed):
 
 ```bash
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --sample-chunk 4M \
     --sample-threshold 100M
 ```
@@ -558,15 +561,15 @@ inspect it, then apply actions later without rescanning.
 
 ```bash
 # 1. Scan and save the report
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --min-size 100M \
     --output json --output-file /tmp/dupes.json
 
 # 2. Inspect the plan from the saved report (no rescanning)
-smart_file_duplicate_manager --from-report /tmp/dupes.json
+sfdm --from-report /tmp/dupes.json
 
 # 3. Execute an action (still dry-run unless --yes is given)
-smart_file_duplicate_manager --from-report /tmp/dupes.json --action trash --yes
+sfdm --from-report /tmp/dupes.json --action trash --yes
 ```
 
 When `--from-report` is used, each file is validated against its recorded
@@ -582,7 +585,7 @@ bash script that performs the action. Review it, then run it manually.
 
 ```bash
 # Generate a delete script (does NOT execute it)
-smart_file_duplicate_manager --path /media/data \
+sfdm --path /media/data \
     --action delete --output shell --output-file /tmp/cleanup.sh
 
 less /tmp/cleanup.sh     # inspect

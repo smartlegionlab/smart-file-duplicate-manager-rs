@@ -4,7 +4,7 @@ use std::fs;
 use tempfile::TempDir;
 
 fn bin() -> Command {
-    Command::cargo_bin("smart_file_duplicate_manager").unwrap()
+    Command::cargo_bin("sfdm").unwrap()
 }
 
 fn make_sandbox() -> TempDir {
