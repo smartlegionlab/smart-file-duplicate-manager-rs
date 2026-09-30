@@ -1,0 +1,39 @@
+name: Release Binaries
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Linux binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build release
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Rename binary with version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          cp target/x86_64-unknown-linux-musl/release/sfdm "sfdm-${VERSION}-linux-x86_64-musl"
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sfdm-${{ github.event.release.tag_name }}-linux-x86_64-musl

@@ -1,12 +1,20 @@
 [package]
-name = "smart_file_duplicate_manager"
-version = "1.0.3"
+name = "smart-file-duplicate-manager"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.85"
-authors = ["Alexander Suvorov (smartlegionlab) <smartlegionlab@gmail.com>"]
+authors = ["Alexander Suvorov <smartlegionlab@gmail.com>"]
 description = "Safe and fast duplicate file manager: multi-stage detection, dry-run, XDG trash, interactive review, reusable reports"
 repository = "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs"
 license = "BSD-3-Clause"
+readme = "README.md"
+keywords = ["cli", "duplicate-files", "deduplication", "file-manager", "trash"]
+categories = ["command-line-utilities", "filesystem"]
+exclude = [".github/", "tests/"]
+
+[[bin]]
+name = "sfdm"
+path = "src/main.rs"
 
 [dependencies]
 blake3 = "1.5"
@@ -22,6 +30,9 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 
-[[bin]]
-name = "sfdm"
-path = "src/main.rs"
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

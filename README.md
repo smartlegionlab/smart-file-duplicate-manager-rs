@@ -8,11 +8,16 @@ multi-stage detection, and full user control at every step.
 
 ---
 
+[![Crates.io](https://img.shields.io/crates/v/smart-file-duplicate-manager)](https://crates.io/crates/smart-file-duplicate-manager)
+[![Documentation](https://docs.rs/smart-file-duplicate-manager/badge.svg)](https://docs.rs/smart-file-duplicate-manager)
 [![GitHub top language](https://img.shields.io/github/languages/top/smartlegionlab/smart-file-duplicate-manager-rs)](https://github.com/smartlegionlab/smart-file-duplicate-manager-rs)
 [![GitHub license](https://img.shields.io/github/license/smartlegionlab/smart-file-duplicate-manager-rs)](https://github.com/smartlegionlab/smart-file-duplicate-manager-rs/blob/master/LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/smartlegionlab/smart-file-duplicate-manager-rs)](https://github.com/smartlegionlab/smart-file-duplicate-manager-rs/)
 [![GitHub stars](https://img.shields.io/github/stars/smartlegionlab/smart-file-duplicate-manager-rs?style=social)](https://github.com/smartlegionlab/smart-file-duplicate-manager-rs/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/smartlegionlab/smart-file-duplicate-manager-rs?style=social)](https://github.com/smartlegionlab/smart-file-duplicate-manager-rs/network/members)
+[![Crates.io Downloads](https://img.shields.io/crates/d/smart-file-duplicate-manager)](https://crates.io/crates/smart-file-duplicate-manager)
+[![Crates.io Downloads (year)](https://img.shields.io/crates/dy/smart-file-duplicate-manager)](https://crates.io/crates/smart-file-duplicate-manager)
+[![Crates.io Downloads (month)](https://img.shields.io/crates/dm/smart-file-duplicate-manager)](https://crates.io/crates/smart-file-duplicate-manager)
 
 ---
 
@@ -116,6 +121,56 @@ probabilistic check — see the sampling section below.
 
 ## Installation
 
+### From crates.io (recommended)
+
+```bash
+cargo install smart-file-duplicate-manager
+```
+
+Installs the `sfdm` binary to `~/.cargo/bin/`. Ensure that directory is in your `PATH`:
+
+```bash
+echo $PATH | tr ':' '\n' | grep -q "$HOME/.cargo/bin" && echo "OK" || echo "NOT IN PATH"
+```
+
+Verify:
+
+```bash
+sfdm --version
+```
+
+Update:
+
+```bash
+cargo install smart-file-duplicate-manager --force
+```
+
+Remove:
+
+```bash
+cargo uninstall smart-file-duplicate-manager
+```
+
+### Prebuilt binary (Linux, x86_64, static)
+
+```bash
+VERSION=$(curl -s https://api.github.com/repos/smartlegionlab/smart-file-duplicate-manager-rs/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+curl -LO "https://github.com/smartlegionlab/smart-file-duplicate-manager-rs/releases/latest/download/sfdm-${VERSION}-linux-x86_64-musl"
+chmod +x "sfdm-${VERSION}-linux-x86_64-musl"
+sudo mv "sfdm-${VERSION}-linux-x86_64-musl" /usr/local/bin/sfdm
+```
+
+Without sudo:
+
+```bash
+mkdir -p ~/.local/bin
+mv "sfdm-${VERSION}-linux-x86_64-musl" ~/.local/bin/sfdm
+```
+
+Static musl build — works on any Linux distribution without glibc dependencies.
+
+### From source
+
 Requires Rust 1.85 or newer (edition 2024).
 
 ```bash
@@ -126,12 +181,9 @@ cargo build --release
 
 Binary: `target/release/sfdm`.
 
-Result files are written to the `results/` directory, which is created
-automatically on the first run.
+### Local install (symlink, for development)
 
-### Install for system-wide use (Linux)
-
-After building, you can call the tool from any directory — no path needed.
+After `cargo build --release`, you can call the tool from any directory:
 
 ```bash
 mkdir -p ~/.local/bin
@@ -154,21 +206,6 @@ Then reload the shell config:
 
 ```bash
 source ~/.bashrc
-```
-
-Verify the installation:
-
-```bash
-which sfdm
-sfdm --version
-```
-
-Now you can run it from anywhere:
-
-```bash
-sfdm --path ~/Downloads
-sfdm --path /media/data --min-size 1G
-sfdm --help
 ```
 
 **Why a symlink?** After every `cargo build --release`, `sfdm` already points
